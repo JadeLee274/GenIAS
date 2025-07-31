@@ -1,0 +1,16 @@
+*.csv
+*.ipynb
+*.log
+*.npy
+*.pt
+*.pth
+*.xlsx
+
+checkpoints/
+data/
+log/
+practice/
+__pycache__/
+save/
+temp/
+test_result/
