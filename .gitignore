@@ -6,6 +6,8 @@
 *.pth
 *.xlsx
 
+debug.py
+
 checkpoints/
 data/
 log/
