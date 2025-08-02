@@ -17,8 +17,7 @@ class Encoder(nn.Module):
     the parameters of encoder is given as follows.
 
     Parameters:
-        in_channels:    W
-        input_features: F
+        in_channels:    F
         tcn_depth:      Depth of the TCN layer.
         hidden_list:    List of the in_channels of each TNC layers.
                         It decides the number of TCN layers.
@@ -28,8 +27,8 @@ class Encoder(nn.Module):
     """
     def __init__(
         self,
-        in_channels: int,
-        input_features: int,
+        window_size: int,
+        num_features: int,
         tcn_depth: int,
         hidden_list: List[int],
         dropout: float,
@@ -42,12 +41,12 @@ class Encoder(nn.Module):
         activation = nn.ReLU()
 
         for i in range(enc_depth - 1):
-            channels_in = in_channels if i == 0 else hidden_list[i - 1]
-            channels_out = hidden_list[i]
+            in_channels = num_features if i == 0 else hidden_list[i - 1]
+            out_channels = hidden_list[i]
             enc_layer.append(
                 TemporalConvNet(
-                    in_channels=channels_in,
-                    hidden_channels=[channels_out] * tcn_depth,
+                    in_channels=in_channels,
+                    hidden_channels=[out_channels] * tcn_depth,
                 )
             )
             enc_layer.append(activation)
@@ -63,21 +62,22 @@ class Encoder(nn.Module):
         self.enc_layer = nn.Sequential(*enc_layer)
 
         self.fc_mu = nn.Linear(
-            in_features=input_features,
+            in_features=window_size,
             out_features=latent_dim,
         )
         self.fc_logvar = nn.Linear(
-            in_features=input_features,
+            in_features=window_size,
             out_features=latent_dim,
         )
 
         self._init_linear_weights()
     
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
-        x = self.enc_layer(x)
-        x = x.squeeze(1)
-        mu = self.fc_mu(x)
-        logvar = self.fc_logvar(x)
+        x = x.transpose(1, 2)      # B, W, F -> B, F, W
+        x = self.enc_layer(x)      # B, F, W -> B, 1, W
+        x = x.squeeze(1)           # B, 1, W -> B, W
+        mu = self.fc_mu(x)         # B, W -> B, L
+        logvar = self.fc_logvar(x) # B, W -> B, L
         return mu, logvar
 
     def _init_linear_weights(self) -> None:
@@ -91,8 +91,8 @@ class Decoder(nn.Module):
     def __init__(
         self,
         latent_dim: int,
-        out_channels: int,
-        out_features: int,
+        window_size: int,
+        num_features: int,
         hidden_list: List[int],
         dropout: float,
     ) -> None:
@@ -103,7 +103,7 @@ class Decoder(nn.Module):
         dec_layer = [
             nn.Linear(
                 in_features=latent_dim,
-                out_features=out_features,
+                out_features=window_size,
             )
         ]
         activation = nn.ReLU()
@@ -124,7 +124,7 @@ class Decoder(nn.Module):
         dec_layer.append(
             nn.ConvTranspose1d(
                 in_channels=hidden_list[dec_depth - 1],
-                out_channels=out_channels,
+                out_channels=num_features,
                 kernel_size=3,
                 stride=1,
                 padding=1,
@@ -138,6 +138,7 @@ class Decoder(nn.Module):
     def forward(self, z: Tensor) -> Tensor:
         out = z.unsqueeze(1)
         out = self.dec_layer(out)
+        out = out.transpose(1, 2)
         return out
 
     def _init_weights(self) -> None:
@@ -162,8 +163,8 @@ class VAE(nn.Module):
     ) -> None:
         super().__init__()
         self.encoder = Encoder(
-            in_channels=window_size,
-            input_features=data_dim,
+            window_size=window_size,
+            num_features=data_dim,
             tcn_depth=tcn_depth,
             hidden_list=hidden_list,
             dropout=0.2,
@@ -171,8 +172,8 @@ class VAE(nn.Module):
         )
         self.decoder = Decoder(
             latent_dim=latent_dim,
-            out_channels=window_size,
-            out_features=data_dim,
+            window_size=window_size,
+            num_features=data_dim,
             hidden_list=list(reversed(hidden_list)),
             dropout=0.2,
         )
