@@ -17,13 +17,20 @@ class Encoder(nn.Module):
     the parameters of encoder is given as follows.
 
     Parameters:
-        in_channels:    F
+        window_size:    W
+        num_features:   F
         tcn_depth:      Depth of the TCN layer.
         hidden_list:    List of the in_channels of each TNC layers.
                         It decides the number of TCN layers.
+                        Given hidden_list as [h_1, h_2, ..., 1], the input with
+                        shape (B, W, F) is transposed to (B, F, W), and is
+                        forwarded by the TCN layers to shape (B, 1, W). 
         dropout:        In what probabiliy that the dropout layer of eacn TCN layer
                         will be activated.
-        latent_dim:     The dimension of latent space.
+        latent_dim:     The dimension of latent space. The input forwarded by 
+                        the TNC layers with shape (B, 1, W) is squeezed to (B, W),
+                        and is forwarded by fc_mu and fc_logvar to shapes (B, L) 
+                        and (B, L).
     """
     def __init__(
         self,
@@ -76,8 +83,8 @@ class Encoder(nn.Module):
         x = x.transpose(1, 2)      # B, W, F -> B, F, W
         x = self.enc_layer(x)      # B, F, W -> B, 1, W
         x = x.squeeze(1)           # B, 1, W -> B, W
-        mu = self.fc_mu(x)         # B, W -> B, L
-        logvar = self.fc_logvar(x) # B, W -> B, L
+        mu = self.fc_mu(x)         # B, W    -> B, L
+        logvar = self.fc_logvar(x) # B, W    -> B, L
         return mu, logvar
 
     def _init_linear_weights(self) -> None:
@@ -88,6 +95,25 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
+    """
+    Decoder layer of VAE. Here, TCN is not used.
+    Given the input of the encoder with size (B, W, F), where
+
+    B = Batch size,
+    W = Window size,
+    F = Number of features of each data point,
+
+    the parameter of decoder is given as follows. 
+
+    Parameters:
+        latent_dim:   Dimension of latent space encoded by the encoder.  
+        window_size:  W
+        num_features: F
+        hidden_list:  List of the in_channels of each TNC layers.
+                      This should be the reverse of hidden_list of Encoder.
+        dropout:      In what probabiliy that the dropout layer of eacn TCN layer
+                      will be activated.
+    """
     def __init__(
         self,
         latent_dim: int,
@@ -152,6 +178,26 @@ class Decoder(nn.Module):
 
 
 class VAE(nn.Module):
+    """
+    TCN-based VAE. Uses Encoder and Decoder classes for encoder and decoder
+    layers. Given the input with shape (B, W, F), where 
+
+    B = Batch size,
+    W = Window length,
+    F = Number of features of each data point,
+
+    the parameters are given as follows.
+
+    Parameters:
+        window_size:   W
+        data_dim:      F
+        latent_dim:    Dimension of latent space.
+        hidden_list:   List of the in_channels of each TNC layers of encoder.
+                       It decides the depth of encoder and decoder.
+                       The hidden_list of decoder is the reversed version of it.
+        tcn_depth:     Depth of the TCN layer.
+        perturb_const: Perturbation constant for the perturbation in the latent space.
+    """
     def __init__(
         self,
         window_size: int,
