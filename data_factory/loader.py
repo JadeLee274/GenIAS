@@ -56,12 +56,12 @@ def overwrite_anomaly(data: Matrix) -> Matrix:
         The data that the anomaly is overwritten.
     """
     data = data.copy()
-    last_normal = data[0].copy()
+    recent_normal = data[0].copy()
     for i in range(1, data.shape[0]):
         if data[i, -1] == 1:
-            data[i] = last_normal
+            data[i] = recent_normal
         else:
-            last_normal = data[i].copy()
+            recent_normal = data[i].copy()
     return data
 
 
