@@ -89,6 +89,8 @@ class Dataset(object):
         scaler.fit(data)
         data = scaler.transform(data)
 
+        self.data_shape = data.shape
+
         self.data = data
         self.labels = labels
         self.mode = mode
