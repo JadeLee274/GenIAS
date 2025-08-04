@@ -5,7 +5,9 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 """
-Codes for loss function of TCN-VAE. This code follows the paper:
+Codes for loss function of TCN-VAE. This code follows the paper
+Darban et al., 2025, GenIAS: Generator for Instantiating Anomalies in Time Series.
+
 Paper link: https://arxiv.org/pdf/2502.08262
 """
 
@@ -93,11 +95,12 @@ def kld_loss(
     Returns:
         KL-Divergence loss.
     """
-    return -0.5 * torch.sum(
-        input=(1 + logvar - mu ** 2 
-               - torch.exp(logvar)/prior_var + 2 * prior_var
+    return torch.mean(
+        -0.5 * torch.sum(
+            input=(1 + logvar - mu ** 2 - torch.exp(logvar)/prior_var + 2 * prior_var),
+            dim=1,
         ),
-        dim=1,
+    dim=0,
     )
 
 
@@ -145,7 +148,9 @@ def loss(
     Here, the defaults of recon_weight, pert_weight, zero_pert_weight, kld_weight
     are given by 1.0., 0.1, 0.01, 0.1, following section 4.4 of the paper.
     """
-    return recon_weight * recon_loss(x, x_hat) \
-    + pert_weight * pert_loss(x, x_hat, x_tilde) \
-    + zero_pert_weight * zero_pert_loss(x, x_tilde) \
-    + kld_weight * kld_loss(mu, logvar, prior_var=prior_var)
+    recon = recon_loss(x, x_hat)
+    pert = pert_loss(x, x_hat)
+    zero_pert = zero_pert_loss(x, x_tilde)
+    kld = kld_loss(mu, logvar, prior_var)
+    total = recon_weight * recon + pert_weight * pert + zero_pert_weight * zero_pert + kld_weight * kld
+    return recon.detach().item(), pert.detach().item(), zero_pert.detach().item(), kld.detach().item(), total
