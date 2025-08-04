@@ -92,7 +92,7 @@ class Dataset(object):
         anomaly_processing: str = 'drop',
         train_ratio: float = 0.5,
     ) -> None:
-        data_path = os.path.join(PATH, dataset)
+        data_path = os.path.join(DATA_PATH, dataset)
         scaler = StandardScaler()
 
         data = None
@@ -117,7 +117,7 @@ class Dataset(object):
                 data = data[:, :-1]
                 labels = np.where(labels == 'Normal', 0, 1)
         elif dataset in ['GECCO_2018', 'GECCO_2019']:
-            data = pd.read_csv(os.path.join(PATH, 'GECCO', dataset, f'1_{dataset.lower().replace('_', '')}_water_quality.csv'))
+            data = pd.read_csv(os.path.join(DATA_PATH, 'GECCO', dataset, f'1_{dataset.lower().replace('_', '')}_water_quality.csv'))
             data.drop(columns=['Time'], inplace=True)
             
             if anomaly_processing == 'drop':
