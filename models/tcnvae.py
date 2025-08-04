@@ -232,7 +232,7 @@ class VAE(nn.Module):
             dropout=0.2,
         )
         self.psi = nn.Parameter(
-            data=torch.empty(batch_size, latent_dim),
+            data=torch.empty(1, latent_dim),
             requires_grad=True,
         )
         nn.init.xavier_normal_(tensor=self.psi)
