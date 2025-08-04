@@ -5,7 +5,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 Vector = np.ndarray
 Matrix = np.ndarray
-DATA_PATH = '/data'
+DATA_PATH = '/data/seungmin'
 """
 Codes for loading data. This code follows the paper
 Darban et al., 2025, GenIAS: Generator for Instantiating Anomalies in Time Series.
@@ -21,7 +21,7 @@ def overwrite_nan(data: Matrix) -> Matrix:
     Parameters:
         data: The data that you want to overwrite.
     """
-    for i in range(1, data.shape[0]):
+    for i in range(data.shape[0]):
         if np.any(np.isnan(data[i])):
             data[i] = data[i - 1]
     return data
@@ -38,8 +38,8 @@ def drop_anomaly(data: Matrix) -> Matrix:
         The data with dropped anomaly.
     """
     new_data = []
-    for i in range(1, data.shape[0]):
-        if data[i, -1] == 0:
+    for i in range(data.shape[0]):
+        if data[i, -1] == False:
             new_data.append(data[i])
     new_data = np.stack(new_data)
     return new_data
@@ -58,7 +58,7 @@ def overwrite_anomaly(data: Matrix) -> Matrix:
     data = data.copy()
     recent_normal = data[0].copy()
     for i in range(1, data.shape[0]):
-        if data[i, -1] == 1:
+        if data[i, -1] == True:
             data[i] = recent_normal
         else:
             recent_normal = data[i].copy()
@@ -119,16 +119,18 @@ class Dataset(object):
         elif dataset in ['GECCO_2018', 'GECCO_2019']:
             data = pd.read_csv(os.path.join(DATA_PATH, 'GECCO', dataset, f'1_{dataset.lower().replace('_', '')}_water_quality.csv'))
             data.drop(columns=['Time'], inplace=True)
-            
+            data = data.values[:, 1:]
+            data = np.array(data, dtype=np.float64)
+
             if anomaly_processing == 'drop':
                 data = drop_anomaly(data)
             elif anomaly_processing == 'overwrite':
                 data = overwrite_anomaly(data)
             
-            data = data.values[:, 1:]
             labels = data[:, -1]
             labels = np.where(labels == False, 0, 1)
             data = data[:, :-1]
+
             train_size = int(data.shape[0] * train_ratio)
             if mode == 'train':
                 data = data[:train_size, :]
