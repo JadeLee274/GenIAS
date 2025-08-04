@@ -5,7 +5,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 Vector = np.ndarray
 Matrix = np.ndarray
-PATH = '/data/seungmin'
+DATA_PATH = '/data'
 """
 Codes for loading data. This code follows the paper
 Darban et al., 2025, GenIAS: Generator for Instantiating Anomalies in Time Series.
