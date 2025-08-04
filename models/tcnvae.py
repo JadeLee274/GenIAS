@@ -3,6 +3,12 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 from .tcn import TemporalConvNet
+"""
+Codes for TCN-VAE. This code follows the bpaper:
+Darban et al., 2025, GenIAS: Generator for Instantiating Anomalies in Time Series.
+
+Paper link: https://arxiv.org/pdf/2502.08262
+"""
 
 
 class Encoder(nn.Module):
