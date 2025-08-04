@@ -1,5 +1,4 @@
 from typing import *
-import math
 import numpy as np
 import torch
 from torch import Tensor
@@ -77,7 +76,7 @@ def zero_pert_loss(x: Tensor, x_tilde: Tensor) -> Tensor:
 def kld_loss(
     mu: Tensor,
     logvar: Tensor,
-    prior_var: float = 0.5,
+    prior_var: float,
 ) -> Tensor:
     """
     Modified KL-Divergence loss of VAE.
@@ -108,7 +107,7 @@ def loss(
     x_tilde: Tensor,
     mu: Tensor,
     logvar: Tensor,
-    logvar_prior: Tensor,
+    prior_var: float = 0.5,
     recon_weight: float = 1.0,
     pert_weight: float = 0.1,
     zero_pert_weight: float = 0.01,
@@ -123,8 +122,10 @@ def loss(
         x_tilde:          Perturbed output, from the VAE.
         mu:               Mean of latent space, from the encoder.
         logvar:           Log variance of latent space, from the encoder.
-        logvar_prior:     Prior log variance prior of the latent space.
-        
+
+        prior_var:        Prior variance prior of the latent space.
+                          Following the paper, default is 0.5.
+
         recon_weight:     Weight of the reconstruction loss.
                           Following the paper, default is 1.0.
                           
@@ -147,4 +148,4 @@ def loss(
     return recon_weight * recon_loss(x, x_hat) \
     + pert_weight * pert_loss(x, x_hat, x_tilde) \
     + zero_pert_weight * zero_pert_loss(x, x_tilde) \
-    + kld_weight * kld_loss(mu, logvar, logvar_prior)
+    + kld_weight * kld_loss(mu, logvar, prior_var=prior_var)
