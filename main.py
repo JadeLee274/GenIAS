@@ -170,7 +170,7 @@ def train(
                     'optim': optimizer.state_dict(),
                     'sched': scheduler.state_dict(),
                 },
-                f=os.path.join(ckpt_dir, f'epoch_{i + 1}.pt')
+                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
             )
     print('Training Finished')
 
