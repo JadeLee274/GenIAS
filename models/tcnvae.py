@@ -206,6 +206,7 @@ class VAE(nn.Module):
     """
     def __init__(
         self,
+        batch_size: int,
         window_size: int,
         data_dim: int,
         latent_dim: int,
@@ -229,13 +230,17 @@ class VAE(nn.Module):
             hidden_list=list(reversed(hidden_list)),
             dropout=0.2,
         )
-        self.psi = perturb_const
+        self.psi = nn.Parameter(
+            data=torch.empty(batch_size, latent_dim),
+            requires_grad=True,
+        )
+        nn.init.xavier_normal_(tensor=self.psi)
     
     def reparam_and_perturb(
         self,
         mu: Tensor,
         logvar: Tensor,
-        psi: float,
+        psi: nn.Parameter,
     ) -> Tuple[Tensor, Tensor]:
         eps = torch.randn_like(mu)
         sigma = torch.exp(0.5 * logvar)
@@ -248,4 +253,4 @@ class VAE(nn.Module):
         z_recon, z_pert = self.reparam_and_perturb(mu, logvar, psi=self.psi)
         x_hat = self.decoder(z_recon)
         x_tilde = self.decoder(z_pert)
-        return x_hat, x_tilde
+        return mu, logvar, x_hat, x_tilde
