@@ -65,6 +65,12 @@ def overwrite_anomaly(data: Matrix) -> Matrix:
     return data
 
 
+def min_max_normalize(x: Matrix) -> Matrix:
+    min_x = np.min(x, axis=0)
+    max_x = np.max(x, axis=0)
+    return (x - min_x) / (max_x - min_x + 1e-4)
+
+
 class Dataset(object):
     """
     Load data.
@@ -143,8 +149,9 @@ class Dataset(object):
         elif convert_nan == 'nan_to_zero':
             data = np.nan_to_num(data)
 
-        scaler.fit(data)
-        data = scaler.transform(data)
+        # scaler.fit(data)
+        # data = scaler.transform(data)
+        data = min_max_normalize(data)
 
         self.data_shape = data.shape
 
