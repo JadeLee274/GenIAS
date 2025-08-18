@@ -37,6 +37,7 @@ class Chomp1d(nn.Module):
             The clipped x with size (B, W, F - chomp_size).
             It is ensured the memory continuity.
         """
+        # return x[:, :, self.chomp_size:].contiguous()
         return x[:, :, :-self.chomp_size].contiguous()
     
 
@@ -61,7 +62,7 @@ class TemporalBlock(nn.Module):
         stride: int,
         dilation: int,
         padding: int,
-        dropout: float = 0.2,
+        dropout: float = 0.1,
     ) -> None:
         super().__init__()
         self.activation = nn.ReLU()
@@ -91,15 +92,33 @@ class TemporalBlock(nn.Module):
         self.chomp2 = Chomp1d(chomp_size=padding)
         self.dropout2 = nn.Dropout(p=dropout)
 
+        self.conv3 = weight_norm(
+            module=nn.Conv1d(
+                in_channels=out_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+            )
+        )
+        self.chomp3 = Chomp1d(chomp_size=padding)
+        self.dropout3 = nn.Dropout(p=dropout)
+
+
         self.net = nn.Sequential(
             self.conv1,
             self.chomp1,
-            self.activation,
             self.dropout1,
+            self.activation,
             self.conv2,
             self.chomp2,
-            self.activation,
             self.dropout2,
+            self.activation,
+            self.conv3,
+            self.chomp3,
+            self.dropout3,
+            self.activation,
         )
         self.downsample = None
 
@@ -114,7 +133,6 @@ class TemporalBlock(nn.Module):
 
     def _init_weights(self) -> None:
         self.conv1.weight.data.normal_(0, 0.01)
-        self.conv2.weight.data.normal_(0, 0.01)
 
         if self.downsample:
             self.downsample.weight.data.normal_(0, 0.01)
@@ -147,8 +165,8 @@ class TemporalConvNet(nn.Module):
         self,
         in_channels: int,
         hidden_channels: List[int],
-        kernel_size: int = 2,
-        dropout: float = 0.2,
+        kernel_size: int = 3,
+        dropout: float = 0.1,
     ) -> None:
         super().__init__()
         layers = []
