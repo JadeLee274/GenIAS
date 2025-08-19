@@ -41,6 +41,7 @@ def train(
     depth: int = 8,
     window_size: int = 200,
     latent_dim: int = 100,
+    gpu_num: int = 0,
     epochs: int = 1000,
     retrain: bool = False,
     ckpt_epoch: int = 5,
@@ -73,7 +74,7 @@ def train(
     )
     data_dim = train_data.data_shape[-1]
 
-    device = torch.device('cuda:0')
+    device = torch.device(f'cuda:{gpu_num}')
 
     model = VAE(
         window_size=window_size,
@@ -183,11 +184,11 @@ def train(
 if __name__ == '__main__':
     args = argparse.ArgumentParser()
     args.add_argument('--dataset', type=str, help='Name of the dataset.')
-    args.add_argument('--hidden-list', nargs='+', type=int, help='List of the in_channels of each TNC layers of encoder.')
     args.add_argument('--batch-size', type=int, default=100, help='Batch size.')
     args.add_argument('--depth', type=int, default=8, help='Depth of Encoder and Decoder of VAE.')
     args.add_argument('--window-size', type=int, default=200, help='Window size.')
     args.add_argument('--latent-dim', type=int, default=100, help='Dimension of latent space.')
+    args.add_argument('--gpu-num', type=int, default=0, help='In what GPU will be used for training.')
     args.add_argument('--epochs', type=int, default=1000, help='Number of epochs')
     args.add_argument('--retrain', type=str2bool, default=False, help='Flag for retraining.')
     args.add_argument('--ckpt-epoch', type=int, default=5, help='From what epoch retraining starts.')
@@ -201,6 +202,7 @@ if __name__ == '__main__':
         depth=config.depth,
         window_size=config.window_size,
         latent_dim=config.latent_dim,
+        gpu_num=config.gpu_num,
         epochs=config.epochs,
         retrain=config.retrain,
         ckpt_epoch=config.ckpt_epoch,
