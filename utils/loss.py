@@ -88,7 +88,6 @@ def zero_pert_loss(x: Tensor, x_tilde: Tensor) -> Tensor:
     loss /= x.shape[0]
 
     return loss
-    # return ((mse_loss(x[ind[0], ind[1]], x_tilde[ind[0], ind[1]]) + 1) ** -1).mean(dim=0)
 
 
 def kld_loss(
