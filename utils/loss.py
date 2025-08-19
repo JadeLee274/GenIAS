@@ -14,8 +14,11 @@ Paper link: https://arxiv.org/pdf/2502.08262
 Default values of arguments follow the paper.
 """
 
+mseloss = nn.MSELoss()
 
-mse_loss = nn.MSELoss()
+
+def mse_loss(x: Tensor, x_hat: Tensor) -> Tensor:
+    return torch.mean((x - x_hat)**2, dim=[1, 2])
 
 
 def recon_loss(x: Tensor, x_hat: Tensor) -> Tensor:
@@ -29,7 +32,7 @@ def recon_loss(x: Tensor, x_hat: Tensor) -> Tensor:
     Returns:
         MSE loss between x and x_hat.
     """
-    return mse_loss(x, x_hat)
+    return mse_loss(x, x_hat).mean(dim=0)
 
 
 def pert_loss(
@@ -54,8 +57,8 @@ def pert_loss(
     Returns:
         Perturbation loss.
     """
-    return F.relu(recon_loss(x, x_hat) - recon_loss(x, x_tilde) + delta_min) \
-    + F.relu(recon_loss(x, x_tilde) - delta_max)
+    return (F.relu(mse_loss(x, x_hat) - mse_loss(x, x_tilde) + delta_min) \
+    + F.relu(mse_loss(x, x_tilde) - delta_max)).mean(dim=0)
 
 
 def zero_pert_loss(x: Tensor, x_tilde: Tensor) -> Tensor:
@@ -70,8 +73,22 @@ def zero_pert_loss(x: Tensor, x_tilde: Tensor) -> Tensor:
     Returns:
         Zero perturbation loss.
     """
-    ind = torch.where(torch.isclose(x, torch.zeros_like(x)).any(dim=2))
-    return torch.mean((recon_loss(x[ind[0], ind[1]], x_tilde[ind[0], ind[1]]) + 1) ** -1)
+    assert x.shape[0] == x_tilde.shape[0] # batch size
+
+    ind = torch.where(torch.isclose(x, torch.zeros_like(x)).all(dim=1))
+    loss = 0.0
+    count = 0
+
+    for i in torch.unique(ind[0]):
+        sub_count = (ind[0] == i).sum().item()
+        sub_loss = mseloss(x[i, :, ind[1][count:count+sub_count]], x_tilde[i, :, ind[1][count:count+sub_count]])
+        loss += (sub_loss + 1) ** -1
+        count += sub_count
+    
+    loss /= x.shape[0]
+
+    return loss
+    # return ((mse_loss(x[ind[0], ind[1]], x_tilde[ind[0], ind[1]]) + 1) ** -1).mean(dim=0)
 
 
 def kld_loss(
@@ -95,8 +112,8 @@ def kld_loss(
         KL-Divergence loss.
     """
     return torch.mean(
-        -0.5 * torch.sum(
-            input=(1 + logvar - mu**2 - torch.exp(logvar)/prior_var + 2*log(sqrt(prior_var))),
+        -0.5 * torch.mean(
+            input=(1 + logvar - (mu/prior_var)**2 - torch.exp(logvar)/prior_var - 2*log(sqrt(prior_var))),
             dim=2,
         ),
     dim=[0, 1],
