@@ -2,7 +2,6 @@ from typing import *
 import os
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 Vector = np.ndarray
 Matrix = np.ndarray
 DATA_PATH = '/data/seungmin'
@@ -99,7 +98,6 @@ class Dataset(object):
         train_ratio: float = 0.5,
     ) -> None:
         data_path = os.path.join(DATA_PATH, dataset)
-        scaler = StandardScaler()
 
         data = None
         labels = None
@@ -151,7 +149,7 @@ class Dataset(object):
 
         # scaler.fit(data)
         # data = scaler.transform(data)
-        data = min_max_normalize(data)
+        # data = min_max_normalize(data)
 
         self.data_shape = data.shape
 
@@ -165,6 +163,6 @@ class Dataset(object):
     
     def __getitem__(self, idx: int) -> Matrix:
         if self.mode == 'train':
-            return np.float32(self.data[idx: idx+self.window_size])
+            return min_max_normalize(np.float32(self.data[idx: idx+self.window_size]))
         elif self.mode == 'test':
-            return np.float32(self.data[idx: idx+self.window_size]), np.float32(self.labels[idx: idx+self.window_size])
+            return np.float32(min_max_normalize(self.data[idx: idx+self.window_size])), np.float32(self.labels[idx: idx+self.window_size])
