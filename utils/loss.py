@@ -106,7 +106,6 @@ def kld_loss(
         logvar:       Log variance of the latent space, from the encoder.
         logvar_prior: Prior log variance of the latent space.
 
-
     Returns:
         KL-Divergence loss.
     """
