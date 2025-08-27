@@ -5,8 +5,8 @@ import torch.optim.lr_scheduler as sched
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from data_factory.loader import Dataset
-from models.tcnvae import VAE
-from models.deepsvdd import SVDD
+from genias.tcnvae import VAE
+from deepsvdd.deepsvdd import SVDD
 from utils.loss import vae_loss, svdd_loss
 from utils.common_import import *
 """
