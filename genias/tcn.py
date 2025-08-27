@@ -4,7 +4,8 @@ from torch.nn.utils import weight_norm
 from utils.common_import import *
 """
 This code follows the following paper:
-Bai et al., 2018, An Empirical Evaluation of Generic Convolutional and Recurrent Networks for Sequence Modeling
+An Empirical Evaluation of Generic Convolutional and Recurrent Networks 
+for Sequence Modeling, Bai et al., 2018
 
 Paper link:  https://arxiv.org/pdf/1803.01271
 Github link: https://github.com/locuslab/TCN
