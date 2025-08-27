@@ -1,13 +1,12 @@
 from typing import *
-import os
-import numpy as np
 import pandas as pd
-Vector = np.ndarray
-Matrix = np.ndarray
+from utils.common_import import *
+from utils.alias import *
 DATA_PATH = '/data/seungmin'
 """
 Codes for loading data. This code follows the paper
-Darban et al., 2025, GenIAS: Generator for Instantiating Anomalies in Time Series.
+GenIAS: Generator for Instantiating Anomalies in Time Series,
+Darban et al., 2025
 
 Paper link: https://arxiv.org/pdf/2502.08262
 """
@@ -76,17 +75,20 @@ class Dataset(object):
 
     Parameters:
         dataset:            Name  of the dataset.
-        window_size:        Length of the sliding window.
-                            Following the paper, default is 200.
-        mode:               Either train or test.
+        window_size:        Length of the sliding window. Default 200.
+        mode:               Either train or test. Default train.
 
-        convert_nan:        How to convert the data with NaN value. Default 'nan_to_zero.'
-                            If dataset is 'GECCO_2018' or 'CECCO_2019', then set it to 'overwrite.'
+        convert_nan:        How to convert the data with NaN value. 
+                            Default 'nan_to_zero.'
+                            If dataset is 'GECCO_2018' or 'CECCO_2019', 
+                            then set it to 'overwrite.'
 
-        anomaly_processing: How to process anomalies of the training dataset. Default is 'drop.'
+        anomaly_processing: How to process anomalies of the training dataset. 
+                            Default 'drop.'
 
-        train_traio:        The ratio of train set. For MSL, SMAP, SMD, SWaT, it is unnecessary.
-                            For GECCO_2018 and GECCO_2019, default is 0.5, following Appendix A of the paper.
+        train_traio:        The ratio of train set. 
+                            For MSL, SMAP, SMD, SWaT, it is unnecessary.
+                            For GECCO_2018 and GECCO_2019, set it to 0.5.
     """
     def __init__(
         self,
@@ -95,19 +97,23 @@ class Dataset(object):
         mode: str = 'train',
         convert_nan: str = 'nan_to_zero',
         anomaly_processing: str = 'drop',
-        train_ratio: float = 0.5,
+        train_ratio: Optional[float] = None,
     ) -> None:
         data_path = os.path.join(DATA_PATH, dataset)
 
         data = None
         labels = None
+        anomalies = None
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
             if mode == 'train':
                 data = np.load(os.path.join(data_path, f'{dataset}_train.npy'))
             elif mode == 'test':
                 data = np.load(os.path.join(data_path, f'{dataset}_test.npy'))
-                labels = np.load(os.path.join(data_path, f'{dataset}_test_label.npy'))
+                labels = np.load(
+                    os.path.join(data_path, f'{dataset}_test_label.npy')
+                )
+                anomalies = data[labels == 1]
         elif dataset == 'SWaT':
             if mode == 'train':
                 data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
@@ -118,10 +124,19 @@ class Dataset(object):
                 data.drop(columns=[' Timestamp'], inplace=True)
                 data = data.values
                 labels = data[:, -1]
+                anomalies = data[labels == 1]
+                anomalies = anomalies[:, :-1]
                 data = data[:, :-1]
                 labels = np.where(labels == 'Normal', 0, 1)
-        elif dataset in ['GECCO_2018', 'GECCO_2019']:
-            data = pd.read_csv(os.path.join(DATA_PATH, 'GECCO', dataset, f'1_{dataset.lower().replace('_', '')}_water_quality.csv'))
+        elif 'GECCO' in dataset.upper():
+            data = pd.read_csv(
+                os.path.join(
+                    DATA_PATH,
+                    'GECCO',
+                    dataset,
+                    f'1_{dataset.lower().replace('_', '')}_water_quality.csv'
+                )
+            )
             data.drop(columns=['Time'], inplace=True)
             data = data.values[:, 1:]
             data = np.array(data, dtype=np.float64)
@@ -147,14 +162,11 @@ class Dataset(object):
         elif convert_nan == 'nan_to_zero':
             data = np.nan_to_num(data)
 
-        # scaler.fit(data)
-        # data = scaler.transform(data)
-        # data = min_max_normalize(data)
-
         self.data_shape = data.shape
 
         self.data = data
         self.labels = labels
+        self.anomalies = anomalies
         self.mode = mode
         self.window_size = window_size
     
@@ -163,6 +175,11 @@ class Dataset(object):
     
     def __getitem__(self, idx: int) -> Matrix:
         if self.mode == 'train':
-            return min_max_normalize(np.float32(self.data[idx: idx+self.window_size]))
+            return min_max_normalize(
+                np.float32(self.data[idx: idx+self.window_size])
+            )
         elif self.mode == 'test':
-            return np.float32(min_max_normalize(self.data[idx: idx+self.window_size])), np.float32(self.labels[idx: idx+self.window_size])
+            return np.float32(
+                min_max_normalize(self.data[idx: idx+self.window_size])
+            ), \
+            np.float32(self.labels[idx: idx+self.window_size])
