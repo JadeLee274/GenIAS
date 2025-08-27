@@ -6,7 +6,8 @@ from utils.common_import import *
 warnings.filterwarnings('ignore')
 """
 Codes for TCN-VAE. This code follows the paper
-Darban et al., 2025, GenIAS: Generator for Instantiating Anomalies in Time Series.
+GenIAS: Generator for Instantiating Anomalies in Time Series,
+Darban et al., 2025
 
 Paper link: https://arxiv.org/pdf/2502.08262
 
@@ -66,8 +67,8 @@ class Decoder(nn.Module):
         num_features: F
         hidden_list:  List of the in_channels of each TNC layers.
                       This should be the reverse of hidden_list of Encoder.
-        dropout:      In what probabiliy that the dropout layer of eacn TCN layer
-                      will be activated.
+        dropout:      In what probabiliy that the dropout layer of eacn TCN 
+                      layer will be activated.
     """
     def __init__(
         self,
@@ -149,7 +150,8 @@ class VAE(nn.Module):
                        It decides the depth of encoder and decoder.
                        The hidden_list of decoder is the reversed version of it.
         tcn_depth:     Depth of the TCN layer.
-        perturb_const: Perturbation constant for the perturbation in the latent space.
+        perturb_const: Perturbation constant for the perturbation 
+                       in the latent space.
     """
     def __init__(
         self,
