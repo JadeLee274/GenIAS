@@ -148,7 +148,7 @@ class VAE(nn.Module):
         latent_dim:    Dimension of latent space.
         hidden_list:   List of the in_channels of each TNC layers of encoder.
                        It decides the depth of encoder and decoder.
-                       The hidden_list of decoder is the reversed version of it.
+                       The hidden_list of decoder is its reversed version.
         tcn_depth:     Depth of the TCN layer.
         perturb_const: Perturbation constant for the perturbation 
                        in the latent space.
