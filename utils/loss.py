@@ -1,13 +1,11 @@
-from typing import *
+from .common_import import *
 from math import log, sqrt
-import numpy as np
-import torch
-from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 """
 Codes for loss function of TCN-VAE. This code follows the paper
-Darban et al., 2025, GenIAS: Generator for Instantiating Anomalies in Time Series.
+GenIAS: Generator for Instantiating Anomalies in Time Series,
+Darban et al. 2025.
 
 Paper link: https://arxiv.org/pdf/2502.08262
 
@@ -50,9 +48,10 @@ def pert_loss(
         x_hat:     Reconstrucded data, without anomalies injected.
         x_tilde:   Reconstructed data, with anomalies injected.
 
-        delta_min: Minmum threshold of recon(x, x_hat) - recon(x, x_tilde). Default is 0.1.
+        delta_min: Minmum threshold of recon(x, x_hat) - recon(x, x_tilde). 
+                   Default 0.1.
 
-        delta_max: Maxmum threshold of recon(x, x_tilde). Default is 0.2.
+        delta_max: Maxmum threshold of recon(x, x_tilde). Default 0.2.
 
     Returns:
         Perturbation loss.
@@ -81,7 +80,10 @@ def zero_pert_loss(x: Tensor, x_tilde: Tensor) -> Tensor:
 
     for i in torch.unique(ind[0]):
         sub_count = (ind[0] == i).sum().item()
-        sub_loss = mseloss(x[i, :, ind[1][count:count+sub_count]], x_tilde[i, :, ind[1][count:count+sub_count]])
+        sub_loss = mseloss(
+            x[i, :, ind[1][count:count+sub_count]],
+            x_tilde[i, :, ind[1][count:count+sub_count]]
+        )
         loss += (sub_loss + 1) ** -1
         count += sub_count
     
@@ -98,8 +100,8 @@ def kld_loss(
     """
     Modified KL-Divergence loss of VAE.
     Follows the equation (5) of the paper.
-    The existence of logvar_prior is justified in the theorem that is proved at
-    the appendix of the paper.
+    The existence of logvar_prior is justified in the theorem that is proved 
+    at the appendix of the paper.
 
     Paramters:
         mu:           Mean of latent space, from the encodr.
@@ -111,20 +113,22 @@ def kld_loss(
     """
     return torch.mean(
         -0.5 * torch.mean(
-            input=(1 + logvar - (mu/prior_var)**2 - torch.exp(logvar)/prior_var - 2*log(sqrt(prior_var))),
+            input=(1 + logvar - (mu/prior_var)**2 \
+                   - torch.exp(logvar)/prior_var - 2*log(sqrt(prior_var))
+            ),
             dim=2,
         ),
     dim=[0, 1],
     )
 
 
-def loss(
+def vae_loss(
     x: Tensor,
     x_hat: Tensor,
     x_tilde: Tensor,
     mu: Tensor,
     logvar: Tensor,
-    prior_var: float = 0.579,
+    prior_var: float = 0.5,
     recon_weight: float = 1.0,
     pert_weight: float = 0.1,
     zero_pert_weight: float = 0.01,
@@ -139,20 +143,68 @@ def loss(
         x_tilde:          Perturbed output, from the VAE.
         mu:               Mean of latent space, from the encoder.
         logvar:           Log variance of latent space, from the encoder.
-        prior_var:        Prior variance prior of the latent space. Default is 0.5.
-        recon_weight:     Weight of the reconstruction loss. Default is 1.0.
-        pert_weight:      Weight of the perturbation loss. Default is 0.1.
-        zero_pert_weight: Weight of the zero perturbation loss. Default is 0.01.
+        prior_var:        Prior variance prior of the latent space. 
+                          Default 0.5.
+        recon_weight:     Weight of the reconstruction loss. Default 1.0.
+        pert_weight:      Weight of the perturbation loss. Default 0.1.
+        zero_pert_weight: Weight of the zero perturbation loss. 
+                          Default 0.01.
                           It the dataset if univariate dataset, set it to 0.0.
-        kld_weight:       Weight of the kld loss. Default is 0.1.
+        kld_weight:       Weight of the kld loss. Default 0.1.
 
     Returns:
-        Reconstruction loss, Perturbatino loss, Zero perturbation loss, KL-Divergence loss, and Total loss of VAE.
-        All losses except the total loss are detached. They are only for recording loss during training.
+        Reconstruction loss, Perturbatino loss, Zero perturbation loss, 
+        KL-Divergence loss, and Total loss of VAE.
+        
+        All losses except the total loss are detached. 
+        They are only for recording loss during training.
     """
     recon = recon_loss(x, x_hat)
     pert = pert_loss(x, x_hat, x_tilde)
     zero_pert = zero_pert_loss(x, x_tilde)
     kld = kld_loss(mu, logvar, prior_var)
-    total = recon_weight * recon + pert_weight * pert + zero_pert_weight * zero_pert + kld_weight * kld
-    return recon.detach().item(), pert.detach().item(), zero_pert.detach().item(), kld.detach().item(), total
+    total = recon_weight * recon + pert_weight * pert \
+            + zero_pert_weight * zero_pert + kld_weight * kld
+    
+    return recon.detach().item(), pert.detach().item(), \
+           zero_pert.detach().item(), kld.detach().item(), total
+
+
+def svdd_loss(
+    objective: str,
+    radius: Tensor,
+    center: Tensor,
+    nu: float,
+    x: Tensor,
+) -> Tensor:
+    """
+    Loss function of Deep SVDD.
+
+    Parameters:
+        objective: Either 'one-class' or 'soft-boundary';
+                   
+                   If 'one-class', then model assumes that all data are normal
+                   and the model optimizes only the mse loss between the 
+                   model output and the center;
+                   
+                   If 'soft-boundary', then the model optimizes the 
+                   sphere radius.
+
+        radius:    Initial Radius of the sphere.
+        center:    Center of the sphere.
+        nu:        Trade-off between penalties and the sphere volume.
+        x:         Output of model.
+    """
+    assert objective in ('one-class', 'soft-boundary'), \
+    "objective must be either 'one-class' or 'soft-boundary'"
+
+    dist = torch.sum((x - center) ** 2, dim=1)
+
+    if objective == 'soft-boundary':
+        scores = dist - radius ** 2
+        loss = radius ** 2 \
+               + torch.mean(torch.max(torch.zeros_like(scores), scores)) / nu
+    elif objective == 'one-class':
+        loss = torch.mean(dist)
+    
+    return dist, loss
