@@ -227,7 +227,13 @@ class CARLADataset(Dataset):
         self.data_dim = data.shape[1]
         self.latent_dim = 100 if self.data_dim != 1 else 50
         self.dataset = dataset
-        self.get_negative_pairs(patch_coef=0.2)
+        
+        if dataset == 'MSL':
+            patch_coef = 0.4
+        elif dataset in ['SMAP', 'Yahoo']:
+            patch_coef = 0.2
+        
+        self.get_negative_pairs(patch_coef=patch_coef)
 
     
     def __len__(self) -> int:
