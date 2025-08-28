@@ -7,10 +7,10 @@ def patch(
     x_tilde: Matrix,
     tau: float,
 ) -> Matrix:
-    _, data_dim = x.shape
+    data_dim = x.shape[1]
     x_tilde_patched = torch.empty_like(x) # torch.emty_like(x_tilde)
 
-    for d in data_dim:
+    for d in range(data_dim):
         x_d = x[:, d]
         x_tilde_d = x_tilde[:, d]
         deviation_d = torch.sum((x_d - x_tilde_d) ** 2)
