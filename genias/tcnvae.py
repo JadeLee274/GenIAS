@@ -1,6 +1,4 @@
-from typing import *
 import warnings
-import torch.nn as nn
 from .tcn import TemporalConvNet
 from utils.common_import import *
 warnings.filterwarnings('ignore')
