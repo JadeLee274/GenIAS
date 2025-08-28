@@ -197,9 +197,9 @@ class CARLADataset(Dataset):
         dataset: str,
         window_size: int = 200,
         mode: str = 'train',
-        convert_nam: str = 'drop',
-        anomaly_processing: str = 'drop',
-        train_ratio: Optional[float] = None,
+        # convert_nan: str = 'drop',
+        # anomaly_processing: str = 'drop',
+        # train_ratio: Optional[float] = None,
     ) -> None:
         data_path = os.path.join(DATA_PATH, dataset)
 
@@ -249,7 +249,7 @@ class CARLADataset(Dataset):
                 random_index = np.random.randint(0, i)
             positive_pairs[i] = self.data[random_index]
         self.positive_pairs = positive_pairs
-        
+
         return None
 
     def get_negative_pairs(self, patch_coef: float) -> None:
