@@ -1,8 +1,11 @@
-from typing import *
 import pandas as pd
+from torch.utils.data import Dataset
+from genias.tcnvae import VAE
+from utils.patch import patch
 from utils.common_import import *
 from utils.alias import *
 DATA_PATH = '/data/seungmin'
+VAE_PATH = '/data/home/tmdals274/genias/checkpoints/vae'
 """
 Codes for loading data. This code follows the paper
 GenIAS: Generator for Instantiating Anomalies in Time Series,
@@ -69,9 +72,9 @@ def min_max_normalize(x: Matrix) -> Matrix:
     return (x - min_x) / (max_x - min_x + 1e-4)
 
 
-class Dataset(object):
+class GenIASDataset(object):
     """
-    Load data.
+    Loads data for training VAE of GenIAS process.
 
     Parameters:
         dataset:            Name  of the dataset.
@@ -117,7 +120,10 @@ class Dataset(object):
         elif dataset == 'SWaT':
             if mode == 'train':
                 data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
-                data.drop(columns=[' Timestamp', 'Normal/Attack'], inplace=True)
+                data.drop(
+                    columns=[' Timestamp', 'Normal/Attack'],
+                    inplace=True,
+                )
                 data = data.values[:, 1:]
             elif mode == 'test':
                 data = pd.read_csv(os.path.join(data_path, 'SWaT_Abormal.csv'))
@@ -176,10 +182,119 @@ class Dataset(object):
     def __getitem__(self, idx: int) -> Matrix:
         if self.mode == 'train':
             return min_max_normalize(
-                np.float32(self.data[idx: idx+self.window_size])
+                np.float32(self.data[idx: idx + self.window_size])
             )
         elif self.mode == 'test':
             return np.float32(
-                min_max_normalize(self.data[idx: idx+self.window_size])
+                min_max_normalize(self.data[idx: idx + self.window_size])
             ), \
-            np.float32(self.labels[idx: idx+self.window_size])
+            np.float32(self.labels[idx: idx + self.window_size])
+
+
+class CARLADataset(Dataset):
+    def __init__(
+        self,
+        dataset: str,
+        window_size: int = 200,
+        mode: str = 'train',
+        convert_nam: str = 'drop',
+        anomaly_processing: str = 'drop',
+        train_ratio: Optional[float] = None,
+    ) -> None:
+        data_path = os.path.join(DATA_PATH, dataset)
+
+        data = None
+        
+        if dataset in ['MSL', 'SMAP', 'SMD']:
+            if mode == 'train':
+                data = np.load(os.path.join(data_path, f'{dataset}_train.npy'))
+        elif dataset == 'SWaT':
+            if mode == 'train':
+                data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
+                data.drop(
+                    columns=[' Timestamp', 'Normal/Attack'],
+                    inplace=True,
+                )
+                data = data.values[:, 1:]
+        
+        data = torch.tensor(data, dtype=torch.float32)
+        self.data = data
+
+        self.data_len = data.shape[0]
+        self.get_positive_pairs()
+        
+        self.window_size = window_size
+        self.data_dim = data.shape[1]
+        self.latent_dim = 100 if self.data_dim != 1 else 50
+        self.dataset = dataset
+        self.get_negative_pairs(patch_coef=0.2)
+
+    
+    def __len__(self) -> int:
+        return self.data.shape[0] - self.window_size + 1
+    
+    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor, Tensor]:
+        anchor = self.data[idx: idx + self.window_size]
+        positive_pair = self.positive_pairs[idx: idx + self.window_size]
+        negative_pair = self.negative_pairs[idx: idx + self.window_size]
+        return anchor, positive_pair, negative_pair
+
+    def get_positive_pairs(self) -> None:
+        positive_pairs = torch.empty_like(self.data)
+
+        for i in range(self.data_len):
+            if i == 0:
+                random_index = i
+            else:
+                random_index = np.random.randint(0, i)
+            positive_pairs[i] = self.data[random_index]
+        self.positive_pairs = positive_pairs
+        
+        return None
+
+    def get_negative_pairs(self, patch_coef: float) -> None:
+        vae = VAE(
+            window_size=self.window_size,
+            data_dim=self.data_dim,
+            latent_dim=self.latent_dim,
+            depth=10,
+        )
+
+        ckpt = torch.load(
+            os.path.join(VAE_PATH, self.dataset, 'epoch_1000.pt')
+        )
+        vae.load_state_dict(ckpt['model'])
+
+        negative_pairs = torch.empty_like(self.data)
+        data_len = self.data.shape[0]
+
+        for i in range(data_len//self.window_size + 1):
+            subdata = self.data[
+                i * self.window_size: (i + 1) * self.window_size
+            ]
+            
+            if subdata.shape[0] != self.window_size:
+                subdata_temp = torch.empty(self.window_size, self.data_dim)
+                subdata_temp[:subdata.shape[0]] = subdata
+                subdata = subdata_temp
+
+            subdata = subdata.unsqueeze(0)
+            negative_pair = vae.forward(subdata)[-1]
+            negative_pair = negative_pair.squeeze(0)
+
+            if subdata.shape[0] != self.window_size:
+                negative_pair = negative_pair[:subdata.shape[0]]
+
+            negative_pairs[
+                i * self.window_size: (i + 1) * self.window_size,
+            ] \
+            = negative_pair
+        
+        negative_pair = patch(
+        x=self.data,
+        x_tilde=negative_pairs,
+        tau=patch_coef
+        )
+        self.negative_pairs = negative_pairs
+
+        return None
