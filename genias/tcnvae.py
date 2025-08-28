@@ -190,7 +190,7 @@ class VAE(nn.Module):
         z_pert = mu + psi * eps * sigma
         return z_recon, z_pert
     
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         mu, logvar = self.encoder(x)
         z_recon, z_pert = self.reparam_and_perturb(mu, logvar, psi=self.psi)
         x_hat = self.decoder(z_recon)
