@@ -4,7 +4,7 @@ import argparse
 import torch.optim.lr_scheduler as sched
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from data_factory.loader import Dataset
+from data_factory.loader import GenIASDataset
 from genias.tcnvae import VAE
 from deepsvdd.deepsvdd import SVDD
 from utils.loss import vae_loss, svdd_loss
@@ -85,7 +85,7 @@ def train_vae(
         init_lr:             Initial learnig rate. Default 1e-4.
         checkpoint_step:     Model is saved once every this epochs. Default 5.
     """
-    train_data = Dataset(
+    train_data = GenIASDataset(
         dataset=dataset,
         window_size=window_size,
         mode='train',
@@ -261,7 +261,7 @@ def train_svdd(
         checkpoint_step:     Model is saved once every this epochs. Default 5.
         init_lr:             Initial learning rate. Default 1e-4.
     """
-    train_data = Dataset(
+    train_data = GenIASDataset(
         dataset=dataset,
         window_size=window_size,
         mode='train',
