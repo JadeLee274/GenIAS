@@ -205,7 +205,7 @@ class CARLADataset(Dataset):
         Training set for CARLA pretext training.
 
         Parameters:
-        dataset:            Name  of the dataset.
+        dataset:            Name of the dataset.
         window_size:        Length of the sliding window. Default 200.
         mode:               Either train or test. Default train.
 
