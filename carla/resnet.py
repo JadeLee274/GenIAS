@@ -9,11 +9,29 @@ def conv1d_same_padding(
     dilation: Tuple[int, int],
     groups: int,
 ) -> F.conv1d:
+    """
+    Function for the 'same' padding in TensorFlow. It is the convolution layer
+    that ensures the input dimension and the output dimension are the same.
+
+    Parameters:
+        input:    Input tensor of convolution layers.
+        weight:   Weight of the convolutional kernel.
+        bias:     Bias of the convolutional kernel.
+        stride:   Stride.
+        dilation: Dilation.
+        groups:   Groups.
+    """
     kernel = weight.size(2)
     dilation = dilation[0]
     stride = stride[0]
-    l_out = l_in = input.size(2)
-    padding = (((l_out - 1) * stride) - l_in + (dilation * (kernel - 1)) + 1)
+
+    # This is to assert that the output dimension matches the input dimension.
+    input_dim = input.size(2)
+    output_dim = input.size(2)  
+    
+    padding = (
+        ((output_dim - 1) * stride) - input_dim + (dilation * (kernel - 1)) + 1
+    )
 
     if padding % 2 != 0:
         input = F.pad(input=input, pad=[0, 1])
@@ -33,7 +51,7 @@ class Conv1dSamePadding(nn.Conv1d):
     def forward(self, x: Tensor) -> Tensor:
         return conv1d_same_padding(
             input=x,
-            weigh=self.weight,
+            weight=self.weight,
             bias=self.bias,
             stride=self.stride,
             dilation=self.dilation,
