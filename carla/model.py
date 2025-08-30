@@ -44,7 +44,9 @@ class ContrastiveModel(nn.Module):
             )
     
     def forward(self, x: Tensor):
+        x = x.transpose(1, 2)
         z = self.resnet(x)
+        z = z.transpose(1, 2)
         z = self.contrastive_head(z)
         z = F.normalize(input=z, dim=1)
         return z
@@ -109,7 +111,7 @@ class ClusteringModel(nn.Module):
         return out
 
     def _initiate_resnet(self) -> None:
-        resnet_path = os.path.join(RESNET_PATH, self.dataset, 'epoch_100.pt')
+        resnet_path = os.path.join(RESNET_PATH, self.dataset, 'epoch_30.pt')
         ckpt = torch.load(resnet_path)
         self.resnet.load_state_dict(ckpt['model'])
         return None
