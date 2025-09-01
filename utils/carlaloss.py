@@ -97,6 +97,73 @@ class pretextloss(nn.Module):
     
 
 class classificationloss(nn.Module):
-    def __init__(self):
-        return
+    def __init__(
+        self,
+        entropy_weight: float = 2.0,
+        inconsistency_weight: float = 0.0,
+    ) -> None:
+        self.softmax = nn.Softmax(dim=1)
+        self.bceloss = nn.BCELoss()
+        self.entropy_weight = entropy_weight
+        self.inconsistency_weight = inconsistency_weight
+
+    def forward(
+        self,
+        anchors: Tensor,
+        nearest_neighbors: Tensor,
+        furthest_neighbors: Tensor,
+    ) -> Tensor:
+        B, N = anchors.size()
+        anchors_probability = self.softmax(anchors)
+        positives_pobability = self.softmax(nearest_neighbors)
+        negative_probability = self.softmax(furthest_neighbors)
+
+        similarity = torch.bmm(
+            anchors_probability.view(B, 1, N),
+            positives_pobability.view(B, N, 1),
+        ).squeeze()
+        positive_pseudolabel = torch.ones_like(similarity)
+        consistency_loss = self.bceloss(
+            similarity,
+            positive_pseudolabel
+        )
+
+        negative_similarity = torch.bmm(
+            anchors_probability.view(B, 1, N),
+            negative_probability.view(B, N, 1),
+        ).squeeze()
+        negative_pseudolabel = torch.zeros_like(negative_similarity)
+        inconsistency_loss = self.bceloss(
+            negative_similarity,
+            negative_pseudolabel
+        )
+
+        entropy_loss = self.entropy(
+            x=torch.mean(anchors_probability, dim=0),
+            input_as_probability=True,
+        )
+
+        total_loss = consistency_loss \
+                    - self.entropy_weight * entropy_loss \
+                    + self.inconsistency_weight * inconsistency_loss
+        
+        return total_loss, consistency_loss, inconsistency_loss, entropy_loss
+    
+    def entropy(
+            self,
+        x: Tensor,
+        input_as_probability: bool,
+    ) -> Tensor:
+        if input_as_probability:
+            x_ = torch.clamp(x, min=1e-8)
+            b = x_ * torch.log(x_)
+        else:
+            b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
+        
+        if len(b.size()) == 2:
+            return -b.sum(dim=1).mean()
+        elif len(b.size()) == 1:
+            return -b.sum()
+        else:
+            raise ValueError(f'Input tensor is {b.size()}-dimensional.')
 
