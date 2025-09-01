@@ -1,7 +1,5 @@
-from .common_import import *
 from math import log, sqrt
-import torch.nn as nn
-import torch.nn.functional as F
+from .common_import import *
 """
 Codes for loss function of TCN-VAE. This code follows the paper
 GenIAS: Generator for Instantiating Anomalies in Time Series,
