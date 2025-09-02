@@ -35,12 +35,12 @@ class pretextloss(nn.Module):
 
     def forward(
         self,
-        representations: Tensor,
+        features: Tensor,
         current_loss: Optional[float] = None,
     ) -> Tensor:
         anchor, positive_pair, negative_pair = torch.split(
-            tensor=representations,
-            split_size_or_sections=self.batch_size,
+            tensor=features,
+            split_size_or_sections=features.shape[0]//3,
             dim=0,
         )
         anchor = F.normalize(anchor, dim=-1)
@@ -60,7 +60,7 @@ class pretextloss(nn.Module):
         ) / self.temperature
 
         negative_dist = torch.sum(
-            input=torch.pow(anchor.unsqueeze(1) - negative_pair),
+            input=torch.pow(anchor.unsqueeze(1) - negative_pair, 2),
             dim=-1
         ) / self.temperature
 
