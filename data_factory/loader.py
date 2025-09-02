@@ -230,21 +230,25 @@ class CARLADataset(Dataset):
     Training set for CARLA pretext training.
 
     Parameters:
-    dataset:            Name of the dataset.
-    window_size:        Length of the sliding window. Default 200.
-    mode:               Either train or test. Default train.
+        dataset:            Name of the dataset.
+        window_size:        Length of the sliding window. Default 200.
+        mode:               Either train or test. Default train.
 
-    convert_nan:        How to convert the data with NaN value. 
-                        Default 'nan_to_zero.'
-                        If dataset is 'GECCO_2018' or 'CECCO_2019', 
-                        then set it to 'overwrite.'
+        convert_nan:        How to convert the data with NaN value. 
+                            Default 'nan_to_zero.'
+                            If dataset is 'GECCO_2018' or 'CECCO_2019', 
+                            then set it to 'overwrite.'
 
-    anomaly_processing: How to process anomalies of the training dataset. 
-                        Default 'drop.'
+        anomaly_processing: How to process anomalies of the training dataset. 
+                            Default 'drop.'
 
-    train_traio:        The ratio of train set. 
-                        For MSL, SMAP, SMD, SWaT, it is unnecessary.
-                        For GECCO_2018 and GECCO_2019, set it to 0.5.
+        train_traio:        The ratio of train set. 
+                            For MSL, SMAP, SMD, SWaT, it is unnecessary.
+                            For GECCO_2018 and GECCO_2019, set it to 0.5.
+
+    Consists of anchor, the window of original data; positive pair, randomly 
+    selected from one of the former 10 windows before the anchor; negative pair,
+    the anomaly-injected-version of anchor.
     """
     def __init__(
         self,
@@ -319,9 +323,11 @@ class CARLADataset(Dataset):
 
         for i in range(positive_pairs.shape[0]):
             if i == 0:
-                idx = 0
-            else:
+                idx = i
+            elif 0 < i and i <= 10:
                 idx = np.random.randint(0, i)
+            else:
+                idx = np.random.randint(i - 10, i)
             positive_pairs[i] = self.windows[idx]
         
         self.positive_windows = positive_pairs
