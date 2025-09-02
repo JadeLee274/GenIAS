@@ -197,9 +197,6 @@ class CARLADataset(Dataset):
         dataset: str,
         window_size: int = 200,
         mode: str = 'train',
-        # convert_nan: str = 'drop',
-        # anomaly_processing: str = 'drop',
-        # train_ratio: Optional[float] = None,
     ) -> None:
         """
         Training set for CARLA pretext training.
@@ -241,48 +238,66 @@ class CARLADataset(Dataset):
         self.data = data
 
         self.data_len = data.shape[0]
-        self.get_positive_pairs()
-        
         self.window_size = window_size
         self.data_dim = data.shape[1]
-        self.latent_dim = 100 if self.data_dim != 1 else 50
         self.dataset = dataset
-        
+
         if dataset == 'MSL':
             patch_coef = 0.4
         elif dataset in ['SMAP', 'Yahoo']:
             patch_coef = 0.2
-        
-        self.get_negative_pairs(patch_coef=patch_coef)
 
-    
+        self.get_windows()
+        self.get_positive_pairs()
+        self.get_negative_pairs(patch_coef=patch_coef)
+             
     def __len__(self) -> int:
         return self.data.shape[0] - self.window_size + 1
     
     def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor, Tensor]:
-        anchor = self.data[idx: idx + self.window_size]
-        positive_pair = self.positive_pairs[idx: idx + self.window_size]
-        negative_pair = self.negative_pairs[idx: idx + self.window_size]
+        anchor = self.windows[idx]
+        positive_pair = self.positive_windows[idx]
+        negative_pair = self.negative_windows[idx]
         return anchor, positive_pair, negative_pair
 
+
+    def get_windows(self) -> None:
+        windows = torch.empty(
+            self.data_len - self.window_size + 1,
+            self.window_size,
+            self.data_dim,
+        )
+        
+        for i in range(self.data_len - self.window_size + 1):
+            windows[i] = self.data[i: i+self.window_size]
+        
+        self.windows = torch.tensor(windows)
+
+        return
+
     def get_positive_pairs(self) -> None:
-        positive_pairs = torch.empty_like(self.data)
+        positive_pairs = torch.empty(
+            self.data_len - self.window_size + 1,
+            self.window_size,
+            self.data_dim
+        )
 
-        for i in range(self.data_len):
+        for i in range(positive_pairs.shape[0]):
             if i == 0:
-                random_index = i
+                idx = 0
             else:
-                random_index = np.random.randint(0, i)
-            positive_pairs[i] = self.data[random_index]
-        self.positive_pairs = positive_pairs
+                idx = np.random.randint(0, i)
+            positive_pairs[i] = self.windows[idx]
+        
+        self.positive_windows = positive_pairs
 
-        return None
-
+        return
+    
     def get_negative_pairs(self, patch_coef: float) -> None:
         vae = VAE(
             window_size=self.window_size,
             data_dim=self.data_dim,
-            latent_dim=self.latent_dim,
+            latent_dim=100 if self.data_dim != 1 else 50,
             depth=10,
         )
 
@@ -316,11 +331,21 @@ class CARLADataset(Dataset):
             ] \
             = negative_pair
         
-        negative_pair = patch(
+        negative_pairs = patch(
         x=self.data,
         x_tilde=negative_pairs,
         tau=patch_coef
         )
-        self.negative_pairs = negative_pairs
+
+        negative_windows = torch.empty(
+            self.data_len - self.window_size + 1,
+            self.window_size,
+            self.data_dim
+        )
+
+        for i in range(self.data_dim - self.window_size + 1):
+            negative_windows[i] = negative_pairs[i: i+self.window_size]
+
+        self.negative_windows = negative_windows
 
         return None
