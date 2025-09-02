@@ -5,7 +5,16 @@ RESNET_PATH = '../checkpoints/resnet'
 
 class ContrastiveModel(nn.Module):
     """
-    Contrastive 
+    Model for Pretext stage of CARLA.
+    
+    Bring the positive pair closer to the anchor, and keeps the negative pair
+    away from the anchor.
+
+    Parameters:
+        in_channels:        Dimension of the data.
+        mid_channels:       out_channels of the hidden convolutional layers.
+        head:               Type of head. Default 'mlp'.
+        representation_dim: Dimension of representation space. Default 128.
     """
     def __init__(
         self,
@@ -43,23 +52,49 @@ class ContrastiveModel(nn.Module):
                 )
             )
     
-    def forward(self, x: Tensor):
+    def forward(self, x: Tensor) -> Tensor:
         x = x.transpose(1, 2)
-        z = self.resnet(x)
+        z = self.resnet.forward(x)
         z = z.transpose(1, 2)
         z = self.contrastive_head(z)
         z = F.normalize(input=z, dim=1)
         return z
     
 
-class ClusteringModel(nn.Module):
+class ClassificationModel(nn.Module):
+    """
+    Model for Self-supervised classification stage of CARLA.
+
+    Parameters:
+        in_channels:  Dimension of data.
+        mid_channels: Mid-channel of the resnet structure.
+        dataset:      Dataset name.
+        num_classes:  Number of classes to which the input will be classified.
+                      Default 10.
+
+
+    This model consists of ResNet (which is pre-trained at the pretext stage)
+    and the cluster head, sending the anchor and nearest neighbors to 
+    (num_classes)-dimensional space.
+
+    With the classificationloss at utils.carlalss.py, the model maximizes the
+    similarity between the representations of window and nearest neighborhood,
+    while minimizing the similarity between those of window and furthest
+    neighborhood.
+
+    By doing so, the inputs of this model is classified to one of the 
+    (num_classes) classes. If trained well, the model sends the majority of
+    normal data to a particular class, which is called C_m - th class.
+
+    At the inference stage, if the input of test set is mapped to C_m - th
+    class, it is inferred as normal; abnormal otherwise.
+    """
     def __init__(
         self,
         in_channels: int,
         mid_channels: int,
-        num_clusters: int,
-        num_heads: int,
         dataset: str,
+        num_classes: int = 10,
     ) -> None:
         super().__init__()
         self.resnet = ResNet(
@@ -70,18 +105,10 @@ class ClusteringModel(nn.Module):
         self._initiate_resnet()
         self.backbone_dim = 2 * mid_channels
 
-        assert isinstance(num_heads, int), "num_heads must be an integer"
-        assert num_heads > 0, "num_heads must be positive"
-        self.num_heads = num_heads
-
-        self.cluster_head = nn.ModuleList(
-            [
-                nn.Linear(
-                    in_features=self.backbone_dim,
-                    out_features=num_clusters,
-                ) for _ in range(self.num_heads)
-            ]
-        )
+        self.cluster_head = nn.Linear(
+            in_features=self.backbone_dim,
+            out_features=num_classes,
+            )
     
     def forward(
         self,
@@ -89,20 +116,21 @@ class ClusteringModel(nn.Module):
         forward_pass: str = 'default',
     ) -> Union[List[Tensor], Tensor, Dict[str, Union[Tensor, List[Tensor]]]]:
         if forward_pass == 'default':
-            representation = self.resnet(x)
-            out = [head(representation) for head in self.cluster_head]
+            feature = self.resnet(x)
+            out = self.cluster_head(feature)
 
         elif forward_pass == 'backbone':
-            out = self.resnet(x)
+            feature = self.resnet(x)
+            out = feature
 
         elif forward_pass == 'head':
-            out = [head(x) for head in self.cluster_head]
+            out = self.cluster_head(x)
 
         elif forward_pass == 'return_all':
-            representation = self.resnet(x)
+            feature = self.resnet(x)
             out = {
-                'representations': representation,
-                'output': [head(x) for head in self.cluster_head],
+                'feature': feature,
+                'output': self.cluster_head(x),
             }
 
         else:
