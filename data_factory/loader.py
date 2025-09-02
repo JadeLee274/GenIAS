@@ -74,11 +74,7 @@ def min_max_normalize(x: Matrix) -> Matrix:
     return (x - min_x) / (max_x - min_x + 1e-4)
 
 
-def patch(
-    x: Matrix,
-    x_tilde: Matrix,
-    tau: float,
-) -> Matrix:
+def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
     """
     Patching function from GenIAS paper, for patching generated anomalies.
     
@@ -230,32 +226,33 @@ class GenIASDataset(object):
 
 
 class CARLADataset(Dataset):
+    """
+    Training set for CARLA pretext training.
+
+    Parameters:
+    dataset:            Name of the dataset.
+    window_size:        Length of the sliding window. Default 200.
+    mode:               Either train or test. Default train.
+
+    convert_nan:        How to convert the data with NaN value. 
+                        Default 'nan_to_zero.'
+                        If dataset is 'GECCO_2018' or 'CECCO_2019', 
+                        then set it to 'overwrite.'
+
+    anomaly_processing: How to process anomalies of the training dataset. 
+                        Default 'drop.'
+
+    train_traio:        The ratio of train set. 
+                        For MSL, SMAP, SMD, SWaT, it is unnecessary.
+                        For GECCO_2018 and GECCO_2019, set it to 0.5.
+    """
     def __init__(
         self,
         dataset: str,
         window_size: int = 200,
         mode: str = 'train',
     ) -> None:
-        """
-        Training set for CARLA pretext training.
-
-        Parameters:
-        dataset:            Name of the dataset.
-        window_size:        Length of the sliding window. Default 200.
-        mode:               Either train or test. Default train.
-
-        convert_nan:        How to convert the data with NaN value. 
-                            Default 'nan_to_zero.'
-                            If dataset is 'GECCO_2018' or 'CECCO_2019', 
-                            then set it to 'overwrite.'
-
-        anomaly_processing: How to process anomalies of the training dataset. 
-                            Default 'drop.'
-
-        train_traio:        The ratio of train set. 
-                            For MSL, SMAP, SMD, SWaT, it is unnecessary.
-                            For GECCO_2018 and GECCO_2019, set it to 0.5.
-        """
+    
         data_path = os.path.join(DATA_PATH, dataset)
 
         data = None
