@@ -13,13 +13,14 @@ class ContrastiveModel(nn.Module):
     Parameters:
         in_channels:        Dimension of the data.
         mid_channels:       out_channels of the hidden convolutional layers.
+                            Default 4.
         head:               Type of head. Default 'mlp'.
         representation_dim: Dimension of representation space. Default 128.
     """
     def __init__(
         self,
         in_channels: int,
-        mid_channels: int,
+        mid_channels: int = 4,
         head: str = 'mlp',
         representation_dim: int = 128,
     ) -> None:
@@ -53,9 +54,7 @@ class ContrastiveModel(nn.Module):
             )
     
     def forward(self, x: Tensor) -> Tensor:
-        x = x.transpose(1, 2)
         z = self.resnet.forward(x)
-        z = z.transpose(1, 2)
         z = self.contrastive_head(z)
         z = F.normalize(input=z, dim=1)
         return z

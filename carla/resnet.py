@@ -91,8 +91,8 @@ class ResidualBlock(nn.Module):
         kernel_size_list: List[int] = [8, 5, 3]
     ) -> None:
         super().__init__()
-        channels = [in_channels] + 3 * [out_channels]
         block_depth = len(kernel_size_list)
+        channels = [in_channels] + block_depth * [out_channels]
 
         layers = []
 
@@ -134,7 +134,7 @@ class ResNet(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        mid_channels: int =  4,
+        mid_channels: int = 4,
     ) -> None:
         super().__init__()
 
@@ -155,7 +155,7 @@ class ResNet(nn.Module):
                 ResidualBlock(
                     in_channels=2*mid_channels,
                     out_channels=2*mid_channels,
-                )
+                ),
             ]
         )
 
