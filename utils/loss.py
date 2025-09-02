@@ -297,7 +297,14 @@ class classificationloss(nn.Module):
         inconsistency_weight: Weight for inconsistency loss. Default is 1.0.
 
     Optimizing this loss is for classifying the normal data to particular
-    class. 
+    class. It is designed to increase the similarity between the
+    representations of window and nearest neighborhoods, while decreasing that
+    of window and furthest neighborhoods, in the C-dimensional space where the
+    datas are sent by the classification model.
+    
+    In addition, to encourage class diversity and prevent overfitting, 
+    the entropy loss on the distribution of window and neighbors are applied 
+    across classes.
     """
     def __init__(
         self,
