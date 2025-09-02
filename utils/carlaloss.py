@@ -1,11 +1,17 @@
-import torch.nn as nn
-import torch.nn.functional as F
 from .common_import import *
+
 
 class pretextloss(nn.Module):
     """
     Loss function for pretext stage of CARLA.
     
+    Parameters:
+        batch_size:     Batch size.
+        temperature:    The cardinality of the set of all triplets (a, p, n)
+        initial_margin: Initial margin that controlls the minimum distance
+                        between positive and negative pairs.
+        adjust_factor:  Adjustment factor when updating the margin.
+
     Optimizing this loss is for decreasing the distance between the anchor and
     its corresponding positive sample, while simultaneously increasing the
     distance between the anchor and its corresponding negative sample, in the
@@ -13,13 +19,6 @@ class pretextloss(nn.Module):
 
     Such approach encourages the model to learn a representation that can
     differentiate between normal and abnormal windows.
-
-    Parameters:
-        batch_size:     Batch size.
-        temperature:    The cardinality of the set of all triplets (a, p, n)
-        initial_margin: Initial margin that controlls the minimum distance
-                        between positive and negative pairs.
-        adjust_factor:  Adjustment factor when updating the margin.
     """
     def __init__(
         self,
@@ -97,10 +96,20 @@ class pretextloss(nn.Module):
     
 
 class classificationloss(nn.Module):
+    """
+    Classification loss for CARLA's self-supervised classification stage.
+
+    Parameters:
+        entropy_weight:       Weight for entropy loss. Default 2.0.
+        inconsistency_weight: Weight for inconsistency loss. Default is 1.0.
+
+    Optimizing this loss is for classifying the normal data to particular
+    class. 
+    """
     def __init__(
         self,
         entropy_weight: float = 2.0,
-        inconsistency_weight: float = 0.0,
+        inconsistency_weight: float = 1.0,
     ) -> None:
         self.softmax = nn.Softmax(dim=1)
         self.bceloss = nn.BCELoss()
@@ -113,7 +122,7 @@ class classificationloss(nn.Module):
         nearest_neighbors: Tensor,
         furthest_neighbors: Tensor,
     ) -> Tensor:
-        B, N = anchors.size()
+        B, N = anchors.shape
         anchors_probability = self.softmax(anchors)
         positives_pobability = self.softmax(nearest_neighbors)
         negative_probability = self.softmax(furthest_neighbors)
@@ -121,8 +130,8 @@ class classificationloss(nn.Module):
         similarity = torch.bmm(
             anchors_probability.view(B, 1, N),
             positives_pobability.view(B, N, 1),
-        ).squeeze()
-        positive_pseudolabel = torch.ones_like(similarity)
+        ).squeeze() # (B, 1)
+        positive_pseudolabel = torch.ones_like(similarity) # (B, 1)
         consistency_loss = self.bceloss(
             similarity,
             positive_pseudolabel
@@ -132,7 +141,7 @@ class classificationloss(nn.Module):
             anchors_probability.view(B, 1, N),
             negative_probability.view(B, N, 1),
         ).squeeze()
-        negative_pseudolabel = torch.zeros_like(negative_similarity)
+        negative_pseudolabel = torch.zeros_like(negative_similarity) # (B, 1)
         inconsistency_loss = self.bceloss(
             negative_similarity,
             negative_pseudolabel
@@ -145,12 +154,12 @@ class classificationloss(nn.Module):
 
         total_loss = consistency_loss \
                     - self.entropy_weight * entropy_loss \
-                    + self.inconsistency_weight * inconsistency_loss
+                    - self.inconsistency_weight * inconsistency_loss
         
         return total_loss, consistency_loss, inconsistency_loss, entropy_loss
     
     def entropy(
-            self,
+        self,
         x: Tensor,
         input_as_probability: bool,
     ) -> Tensor:
