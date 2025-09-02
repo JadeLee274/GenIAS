@@ -3,7 +3,6 @@ from torch.utils.data import Dataset
 from genias.tcnvae import VAE
 from utils.patch import patch
 from utils.common_import import *
-from utils.alias import *
 DATA_PATH = '/data/seungmin'
 VAE_PATH = '/data/home/tmdals274/genias/checkpoints/vae'
 """
