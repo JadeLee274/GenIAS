@@ -5,12 +5,10 @@ import torch.optim.lr_scheduler as sched
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from utils.common_import import *
-from data_factory.loader import GenIASDataset, CARLADataset
+from data_factory.loader import GenIASDataset
 from genias.tcnvae import VAE
-from carla.model import ContrastiveModel
 from deepsvdd.deepsvdd import SVDD
 from utils.loss import vae_loss, svdd_loss
-from utils.carlaloss import pretextloss
 """
 Codes for training of TCN-VAE. This code follows the paper
 GenIAS: Generator for Instantiating Anomalies in Time Series,
@@ -406,7 +404,7 @@ if __name__ == '__main__':
     args.add_argument(
         '--train-model',
         type=str,
-        help="Which model to train. Must be either 'VAE' or 'SVDD'."
+        help="Which model to train. Either 'VAE' or 'SVDD'."
     )
     args.add_argument(
         '--dataset',
