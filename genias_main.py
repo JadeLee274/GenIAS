@@ -214,7 +214,7 @@ def train_vae(
             
     print('Training Finished')
 
-    return None
+    return
 
 
 def train_svdd(
@@ -395,7 +395,7 @@ def train_svdd(
     
     print('Training finished.')
 
-    return None
+    return
 
 
 if __name__ == '__main__':
