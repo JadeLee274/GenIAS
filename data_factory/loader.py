@@ -1,7 +1,6 @@
 import pandas as pd
 from torch.utils.data import Dataset
 from genias.tcnvae import VAE
-from utils.patch import patch
 from utils.common_import import *
 DATA_PATH = '/data/seungmin'
 VAE_PATH = '/data/home/tmdals274/genias/checkpoints/vae'
@@ -66,9 +65,49 @@ def overwrite_anomaly(data: Matrix) -> Matrix:
 
 
 def min_max_normalize(x: Matrix) -> Matrix:
+    """
+    Normalize each column of data using minimum and maximum values of this
+    column.
+    """
     min_x = np.min(x, axis=0)
     max_x = np.max(x, axis=0)
     return (x - min_x) / (max_x - min_x + 1e-4)
+
+
+def patch(
+    x: Matrix,
+    x_tilde: Matrix,
+    tau: float,
+) -> Matrix:
+    """
+    Patching function from GenIAS paper, for patching generated anomalies.
+    
+    Parameters:
+        x:       Normal data.
+        x_tilde: Generated anomalies through VAE.
+        tau:     Coefficient for distance between normal data and anomaly.
+
+    Returns:
+        Patched anomaly.
+
+    For each column of generated anomalies, if the amplitude is larger than the
+    tau * (distance between the normal data column and the anomaly data colum),
+    then the column remains still, converted to normal data otherwise.
+    """
+    data_dim = x.shape[1]
+    x_tilde_patched = torch.empty_like(x) # torch.emty_like(x_tilde)
+
+    for d in range(data_dim):
+        x_d = x[:, d]
+        x_tilde_d = x_tilde[:, d]
+        deviation_d = torch.sum((x_d - x_tilde_d) ** 2)
+        amplitude_d = torch.max(x_d) - torch.min(x_d)
+        if deviation_d > tau * amplitude_d:
+            x_tilde_patched[:, d] = x_tilde[:, d]
+        else:
+            x_tilde_patched[:, d] = x[:, d]
+
+    return x_tilde_patched
 
 
 class GenIASDataset(object):
