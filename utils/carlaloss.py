@@ -75,25 +75,8 @@ class pretextloss(nn.Module):
         )
         loss = torch.mean(loss)
 
-        return loss
-    
-    def consine_similarity(
-        self,
-        x1: Tensor,
-        x2: Tensor,
-    ) -> Tensor:
-        dot_prod = torch.sum(x1 * x2, dim=1)
-        norm_prod = torch.norm(x1, dim=1) * torch.norm(x2, dim=1)
-        cos_similarity = dot_prod / norm_prod
-        return cos_similarity
-    
-    def euclidean_dist(
-        self,
-        x1: Tensor,
-        x2: Tensor,
-    ) -> Tensor:
-        return torch.sqrt(((x1 - x2) ** 2).sum(dim=1))
-    
+        return loss 
+ 
 
 class classificationloss(nn.Module):
     """
@@ -175,4 +158,3 @@ class classificationloss(nn.Module):
             return -b.sum()
         else:
             raise ValueError(f'Input tensor is {b.size()}-dimensional.')
-
