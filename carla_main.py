@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import torch.optim as optim
 from carla.model import ContrastiveModel
 from utils.common_import import *
-from utils.loss import pretextloss
+from utils.loss import pretextloss, classificationloss
 
 
 def pretext(
@@ -144,8 +144,12 @@ def classification(
     space, where C is the number of classes that the classification model
     wants to classify data.
 
-    The loss function is designed to increase the similarity between the
-    representations (in the C-dimensional space) of 
+    If trained well, the classification model sends the majority of normal data
+    to the specific class, namely C_m. In the inference stage, the input from
+    the test set is fed to the classification model, and considered normal
+    if the probability such that the data is sent to C_m - th class is larger
+    than the probabilities such that the data is sent to another class; 
+    abnormal otherwise.
     """
     
     return 
