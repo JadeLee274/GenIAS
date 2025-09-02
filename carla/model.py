@@ -104,7 +104,7 @@ class ClassificationModel(nn.Module):
         self._initiate_resnet()
         self.backbone_dim = 2 * mid_channels
 
-        self.cluster_head = nn.Linear(
+        self.classification_head = nn.Linear(
             in_features=self.backbone_dim,
             out_features=num_classes,
             )
@@ -116,20 +116,20 @@ class ClassificationModel(nn.Module):
     ) -> Union[List[Tensor], Tensor, Dict[str, Union[Tensor, List[Tensor]]]]:
         if forward_pass == 'default':
             feature = self.resnet(x)
-            out = self.cluster_head(feature)
+            out = self.classification_head(feature)
 
         elif forward_pass == 'backbone':
             feature = self.resnet(x)
             out = feature
 
         elif forward_pass == 'head':
-            out = self.cluster_head(x)
+            out = self.classification_head(x)
 
         elif forward_pass == 'return_all':
             feature = self.resnet(x)
             out = {
                 'feature': feature,
-                'output': self.cluster_head(x),
+                'output': self.classification_head(x),
             }
 
         else:
