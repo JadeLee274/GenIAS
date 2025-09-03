@@ -64,10 +64,37 @@ def overwrite_anomaly(data: Matrix) -> Matrix:
     return data
 
 
+def mean_std_normalize(x: Matrix, eps: float = 1e-8) -> Matrix:
+    """
+    Normalize each comlum of data using its mean and standard deviation.
+
+    Parameters:
+        x:   Input data.
+        eps: Constant that prevents dividing by zero.
+        
+    Returns:
+        Normlaized data with respect to maen and standard deviation.
+    """
+
+    for i in range(x.shape[-1]):
+        mean = np.mean(x[:, i])
+        std = np.std(x[:, i])
+        x[:, i] -= mean
+        x[:, i] /= (std + eps)
+    
+    return x
+
+
 def min_max_normalize(x: Matrix) -> Matrix:
     """
     Normalize each column of data using minimum and maximum values of this
     column.
+
+    Parameters:
+        x: Input data.
+    
+    Returns:
+        Normalized data with respect to maximum and minimum.
     """
     min_x = np.min(x, axis=0)
     max_x = np.max(x, axis=0)
@@ -131,6 +158,7 @@ class GenIASDataset(object):
         self,
         dataset: str,
         window_size: int = 200,
+        normalize: str = 'min_max',
         mode: str = 'train',
         convert_nan: str = 'nan_to_zero',
         anomaly_processing: str = 'drop',
@@ -207,22 +235,44 @@ class GenIASDataset(object):
         self.data = data
         self.labels = labels
         self.anomalies = anomalies
+
+        assert normalize in ['min_max', 'mean_std', 'none'], \
+        "'normalize' argument must be either 'min_max' or 'mean_std'."
+
+        self.normalize = normalize
         self.mode = mode
         self.window_size = window_size
     
     def __len__(self) -> int:
         return len(self.data) - self.window_size + 1
     
-    def __getitem__(self, idx: int) -> Matrix:
+    def __getitem__(self, idx: int) -> Union[Matrix, Tuple[Matrix, Matrix]]:
         if self.mode == 'train':
-            return min_max_normalize(
-                np.float32(self.data[idx: idx + self.window_size])
-            )
+            if self.normalize == 'min_max':
+                return min_max_normalize(
+                    np.float32(self.data[idx: idx + self.window_size])
+                )
+            elif self.normalize == 'mean_std':
+                return mean_std_normalize(
+                    np.float32(self.data[idx, idx + self.window_size])
+                )
+            else:
+                return np.float32(self.data[idx: idx + self.window_size])
+            
         elif self.mode == 'test':
-            return np.float32(
-                min_max_normalize(self.data[idx: idx + self.window_size])
-            ), \
-            np.float32(self.labels[idx: idx + self.window_size])
+            if self.normalize == 'min_max':
+                return np.float32(
+                    min_max_normalize(self.data[idx: idx + self.window_size])
+                ), \
+                np.float32(self.labels[idx: idx + self.window_size])
+            elif self.normalize == 'mean_std':
+                return np.float32(
+                    mean_std_normalize(self.data[idx: idx + self.window_size])
+                ), \
+                np.float32(self.labels[idx: idx + self.window_size])
+            else:
+                return np.float32(self.data[idx: idx + self.window_size]), \
+                np.float32(self.labels[idx: idx + self.window_size])
 
 
 class CARLADataset(Dataset):
@@ -254,9 +304,9 @@ class CARLADataset(Dataset):
         self,
         dataset: str,
         window_size: int = 200,
+        normalize: str = 'min_max',
         mode: str = 'train',
     ) -> None:
-    
         data_path = os.path.join(DATA_PATH, dataset)
 
         data = None
@@ -274,12 +324,18 @@ class CARLADataset(Dataset):
                 data = data.values[:, 1:]
         
         data = torch.tensor(data, dtype=torch.float32)
-        self.data = data
-
-        self.data_len = data.shape[0]
-        self.window_size = window_size
-        self.data_dim = data.shape[1]
         self.dataset = dataset
+
+        self.data = data
+        self.data_len = data.shape[0]
+        self.data_dim = data.shape[1]
+
+        self.window_size = window_size
+
+        assert normalize in ['min_max', 'mean_std', 'none'], \
+        "'normalize' argument must be either 'min_max' or 'mean_std'."
+
+        self.normalize = normalize
 
         if dataset == 'MSL':
             patch_coef = 0.4
@@ -297,8 +353,18 @@ class CARLADataset(Dataset):
         anchor = self.windows[idx]
         positive_pair = self.positive_windows[idx]
         negative_pair = self.negative_windows[idx]
-        return anchor, positive_pair, negative_pair
 
+        if self.normalize == 'min_max':
+            anchor = min_max_normalize(anchor)
+            positive_pair = min_max_normalize(positive_pair)
+            negative_pair = min_max_normalize(negative_pair)
+
+        elif self.normalize == 'mean_std':
+            anchor = mean_std_normalize(anchor)
+            positive_pair = mean_std_normalize(positive_pair)
+            negative_pair = mean_std_normalize(negative_pair)
+        
+        return anchor, positive_pair, negative_pair
 
     def get_windows(self) -> None:
         windows = torch.empty(
@@ -389,4 +455,4 @@ class CARLADataset(Dataset):
 
         self.negative_windows = negative_windows
 
-        return None
+        return
