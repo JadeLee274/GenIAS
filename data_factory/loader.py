@@ -248,31 +248,29 @@ class GenIASDataset(object):
     
     def __getitem__(self, idx: int) -> Union[Matrix, Tuple[Matrix, Matrix]]:
         if self.mode == 'train':
+            window = self.data[idx: idx + self.window_size]
+            
             if self.normalize == 'min_max':
-                return min_max_normalize(
-                    np.float32(self.data[idx: idx + self.window_size])
-                )
+                window = min_max_normalize(window)
             elif self.normalize == 'mean_std':
-                return mean_std_normalize(
-                    np.float32(self.data[idx, idx + self.window_size])
-                )
-            else:
-                return np.float32(self.data[idx: idx + self.window_size])
+                window =  mean_std_normalize(window)
+
+            window = np.float32(window)
+            return window
             
         elif self.mode == 'test':
+            window = self.data[idx: idx + self.window_size]
+            label = self.labels[idx: idx + self.window_size]
+
             if self.normalize == 'min_max':
-                return np.float32(
-                    min_max_normalize(self.data[idx: idx + self.window_size])
-                ), \
-                np.float32(self.labels[idx: idx + self.window_size])
+                window = min_max_normalize(window)
             elif self.normalize == 'mean_std':
-                return np.float32(
-                    mean_std_normalize(self.data[idx: idx + self.window_size])
-                ), \
-                np.float32(self.labels[idx: idx + self.window_size])
-            else:
-                return np.float32(self.data[idx: idx + self.window_size]), \
-                np.float32(self.labels[idx: idx + self.window_size])
+                window = mean_std_normalize(self.data[idx: idx + self.window_size])
+
+            window = np.float32(window)
+            label = np.float32(label)
+            
+            return window, label
 
 
 class CARLADataset(Dataset):
