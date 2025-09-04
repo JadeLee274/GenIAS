@@ -233,7 +233,7 @@ class pretextloss(nn.Module):
     def __init__(
         self,
         batch_size: int,
-        temperature: int,
+        temperature: float = 0.4,
         initial_margin: float = 1.0,
         adjust_factor: float = 0.1,
     ) -> None:
