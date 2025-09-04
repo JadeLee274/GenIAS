@@ -8,7 +8,7 @@ def conv1d_same_padding(
     stride: Tuple[int, int],
     dilation: Tuple[int, int],
     groups: int,
-) -> F.conv1d:
+) -> Tensor:
     """
     Function for the 'same' padding in TensorFlow. It is the convolution layer
     that ensures the input dimension and the output dimension are the same.
@@ -112,16 +112,14 @@ class ResidualBlock(nn.Module):
 
         if in_channels != out_channels:
             self.match_channels = True
-            self.residual_layer = nn.Sequential(
-                *[
-                    Conv1dSamePadding(
-                        in_channels=in_channels,
-                        out_channels=out_channels,
-                        kernel_size=1,
-                        stride=1,
-                    ),
-                    nn.BatchNorm1d(num_features=out_channels),
-                ]
+            self.residual_layer = nn.Sequential(      
+                Conv1dSamePadding(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=1,
+                    stride=1,
+                ),
+                nn.BatchNorm1d(num_features=out_channels),
             )
     
     def forward(self, x: Tensor) -> Tensor:
@@ -143,20 +141,18 @@ class ResNet(nn.Module):
         }
 
         self.layers = nn.Sequential(
-            *[
-                ResidualBlock(
-                    in_channels=in_channels,
-                    out_channels=mid_channels
-                ),
-                ResidualBlock(
-                    in_channels=mid_channels,
-                    out_channels=2*mid_channels
-                ),
-                ResidualBlock(
-                    in_channels=2*mid_channels,
-                    out_channels=2*mid_channels,
-                ),
-            ]
+            ResidualBlock(
+                in_channels=in_channels,
+                out_channels=mid_channels
+            ),
+            ResidualBlock(
+                in_channels=mid_channels,
+                out_channels=2*mid_channels
+            ),
+            ResidualBlock(
+                in_channels=2*mid_channels,
+                out_channels=2*mid_channels,
+            ),
         )
 
     def forward(self, x: Tensor) -> Tensor:
