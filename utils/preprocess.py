@@ -4,7 +4,7 @@ from utils.common_import import *
 device = torch.device('cuda:0')
 
 
-######################## GenIAS preprocessing function ########################
+####################### GenIAS preprocessing functions########################
 
 def overwrite_nan(data: Matrix) -> Matrix:
     """
@@ -125,7 +125,7 @@ def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
 
     return x_tilde_patched
 
-###################### CARLA pretext processing function ######################
+##################### CARLA pretext processing functions #####################
 
 def noise_transformation(
     x: Tensor,
@@ -380,4 +380,3 @@ class AnomalyInjection(object):
                 )
 
         return degraded_window
-
