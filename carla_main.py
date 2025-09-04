@@ -65,7 +65,6 @@ def pretext(
 
     criterion = pretextloss(
         batch_size=batch_size,
-        temperature=train_dataset.data_len
     ).to(device)
 
     ckpt_dir = os.path.join(f'checkpoints/carla_pretext/{dataset}')
@@ -89,7 +88,7 @@ def pretext(
             positive_pair = positive_pair.to(device)
             negative_pair = negative_pair.to(device)
             _inputs = torch.cat([anchor, positive_pair, negative_pair], dim=0)
-            _inputs = _inputs.view(3 * B, W, F).transpose(1, 2)
+            _inputs = _inputs.view(3 * B, F, W)
             _features = model(_inputs)
             loss = criterion.forward(
                 features=_features,

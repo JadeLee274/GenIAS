@@ -1,5 +1,10 @@
+import random
+from faiss import IndexFlatL2
 from utils.common_import import *
+device = torch.device('cuda:0')
 
+
+######################## GenIAS preprocessing function ########################
 
 def overwrite_nan(data: Matrix) -> Matrix:
     """
@@ -119,3 +124,203 @@ def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
             x_tilde_patched[:, d] = x[:, d]
 
     return x_tilde_patched
+
+###################### CARLA pretext processing function ######################
+
+def noise_transformation(
+    x: Tensor,
+    sigma: float = 0.01
+) -> Tensor:
+    """
+    Inject Gaussian noise with to data.
+    Used for choosing positive pair of first 10 windows.
+    This is a basic form of data augmentation.
+    
+    Parameters:
+        x:     The data that the noise will be injected.
+        sigma: The standard deviation of the noise. Default 0.01.
+               The mean of the noise is zero.
+    """
+    if x.device.type == 'cuda':
+        x = x.cpu()
+    noise = np.random.normal(loc=0, scale=sigma, size=x.shape)
+
+    return torch.tensor(
+        data=x.numpy() + noise,
+        dtype=torch.float32,
+        device=device,
+    )
+
+
+class AnomalyInjection(object):
+    def __init__(self, portion_len: float = 0.99) -> None:
+        self.portion_len = portion_len
+        return
+    
+    def inject_anomaly(
+        self,
+        window: Tensor,
+        subsequence_length: Optional[int] = None,
+        compression_factor: Optional[int] = None,
+        start_idx: Optional[int] = None,
+        trend_end: bool = False,
+        scale_factor: Optional[int] = None,
+        trend_factor: Optional[float] = None,
+        shapelet_factor: bool = False,
+    ) -> Matrix:
+        """
+        
+        Parameters:
+            window:             The window that the anomaly will be injected.
+
+                                The anomaly-injected-subset of the window will
+                                be called 'subsequence' in this description.
+
+            subsequence_length: The length of the subsequence. Default None.
+                                If not specified, it is determined as one of
+                                the integers between 0.1 * (window length) and
+                                0.9 * (window length).
+
+            compression_factor: The degraded subsequence will be shortened to
+                                1/(this factor) of its length. Default None.
+                                If not specified, it is determined as one of
+                                2, 3, 4.
+
+            start_idx:          The anomaly injection starts from this index.
+                                That is, the subsequence will be started from
+                                this index. Default None. If not specified, it
+                                is determined as one of the integers between
+                                0 and (window length - subsequence length).
+
+            trend_end:          Determines if that the subsequence lasts to
+                                the last index of the window. Default False.
+
+            scale_factor:       The subsequence will be scaled by this value.
+                                Default None. If not specified, it is 
+                                determined as one of the floats between 0.1 and 2.0.
+
+            shapelet_factor:    
+        """
+        window = window.clone()
+
+        if subsequence_length is None:
+            min_len = int(window.shape[0] * 0.1)
+            max_len = int(window.shape[0] * 0.9)
+            subsequence_length = np.random.randint(min_len, max_len)
+
+        if compression_factor is None:
+            compression_factor = np.random.randint(2, 5)
+
+        if scale_factor is None:
+            scale_factor = np.random.uniform(0.1, 2.0, window.shape[1])
+        
+        if start_idx is None:
+            start_idx = np.random.randint(0, len(window) - subsequence_length)
+        
+        end_idx = min(start_idx + subsequence_length, window.shape[0])
+
+        if trend_end:
+            end_idx = window.shape[0]
+
+        degraded_subsequence = window[start_idx: end_idx]
+        degraded_subsequence = degraded_subsequence.repeat(
+            compression_factor, 1
+        )
+        degraded_subsequence = degraded_subsequence[::compression_factor]
+        degraded_subsequence = degraded_subsequence * scale_factor
+
+        if trend_factor is None:
+            trend_factor = np.random.normal(1, 0.5)
+
+        trend_coef = 1
+        random_float = np.random.uniform()
+
+        if random_float < 0.5:
+            trend_coef = -1
+        
+        degraded_subsequence = degraded_subsequence + trend_coef * trend_factor
+
+        if shapelet_factor:
+            degraded_subsequence = window[start_idx] \
+            + (torch.rand_like(window[start_idx]) * 0.1)
+        
+        window[start_idx: end_idx] = degraded_subsequence
+
+        return np.squeeze(window)
+    
+    def __call__(self, x: Tensor) -> Matrix:
+        window = x.clone()
+
+        anomaly_seasonal = window.clone()
+        anomaly_trend = window.clone()
+        anomaly_global = window.clone()
+        anomaly_contextual = window.clone()
+        anomaly_shapelet = window.clone()
+
+        min_len = int(window.shape[0] * 0.1)
+        max_len = int(window.shape[0] * 0.9)
+
+        subsequence_length = np.random.randint(min_len, max_len)
+        start_idx = np.random.randint(0, len(window) - subsequence_length)
+        
+        anomaly_types = [
+            'global',
+            'contextual',
+            'seasonal',
+            'shapelet',
+            'trend'
+        ]
+
+        anomaly_type = random.choice(anomaly_types)
+
+        if window.ndim > 1:
+            num_features = window.shape[1]
+            num_dims = np.random.randint(num_features//10, num_features//2)
+
+            for _ in range(num_dims):
+                i = np.random.randint(0, num_features)
+                temp_window = window[:, i].reshape(window.shape[0], 1)
+                anomaly_seasonal[:, i] = self.inject_anomaly(
+                    window=temp_window,
+                    subsequence_length=subsequence_length,
+                    start_idx=start_idx,
+                    scale_factor=1,
+                    trend_factor=0,
+                )
+
+                anomaly_trend[:, i] = self.inject_anomaly(
+                    window=temp_window,
+                    subsequence_length=subsequence_length,
+                    compression_factor=1,
+                    start_idx=start_idx,
+                    trend_end=True,
+                    scale_factor=1,
+                )
+
+                anomaly_global[:, i] = self.inject_anomaly(
+                    window=temp_window,
+                    subsequence_length=2,
+                    compression_factor=1,
+                    start_idx=start_idx,
+                    scale_factor=8,
+                    trend_factor=0,
+                )
+                anomaly_contextual[:, i] = self.inject_anomaly(
+                    window=temp_window,
+                    subsequence_length=4,
+                    compression_factor=1,
+                    start_idx=start_idx,
+                    scale_factor=3,
+                    trend_factor=0,
+                )
+                anomaly_shapelet[:, i] = self.inject_anomaly(
+                    window=temp_window,
+                    subsequence_length=subsequence_length,
+                    compression_factor=1,
+                    start_idx=start_idx,
+                    scale_factor=1,
+                    trend_factor=0,
+                    shapelet_factor=True,
+                )
+        else:
+            temp_window = window.reshape(len(window), 1)
