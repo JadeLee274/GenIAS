@@ -52,12 +52,25 @@ class ContrastiveModel(nn.Module):
                     out_features=representation_dim,
                 )
             )
+
+        return
     
     def forward(self, x: Tensor) -> Tensor:
         z = self.resnet.forward(x)
         z = self.contrastive_head(z)
         z = F.normalize(input=z, dim=1)
         return z
+    
+    def _init_weights(self) -> None:
+        for param in self.parameters():
+            if isinstance(param, nn.Linear):
+                nn.init.xavier_normal_(param.weight)
+                nn.init.zeros_(param.bias)
+            elif isinstance(param, nn.Conv1d):
+                nn.init.kaiming_normal_(param.weight)
+                nn.init.zeros_(param.bias)
+
+        return
     
 
 class ClassificationModel(nn.Module):
