@@ -157,7 +157,8 @@ class GenIASDataset(object):
 class PretextDataset(object):
     """
     Dataset for CARLA pretext stage.
-    Consists of window, positive pair, negative pair when mode is 'train'; 
+    This is the modified version of 'AugmentDatset' of CARLA code.
+    It loads anchor, positive pair, negative pair when mode is 'train'; 
     and label, in addition, when mode is 'test'.
 
     Parameters:
