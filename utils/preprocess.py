@@ -94,6 +94,15 @@ def min_max_normalize(x: Matrix) -> Matrix:
     return (x - min_x) / (max_x - min_x + 1e-4)
 
 
+def convert_to_windows(data: Matrix, window_size: int = 200) -> Tensor:
+    windows = []
+
+    for i in range(data.shape[0] - window_size + 1):
+        windows.append(data[i: i + window_size])
+
+    return np.array(windows)
+
+
 def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
     """
     Patching function from GenIAS paper, for patching generated anomalies.
@@ -128,7 +137,7 @@ def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
 ##################### CARLA pretext processing functions #####################
 
 def noise_transformation(
-    x: Tensor,
+    x: Matrix,
     sigma: float = 0.01
 ) -> Tensor:
     """
@@ -141,15 +150,9 @@ def noise_transformation(
         sigma: The standard deviation of the noise. Default 0.01.
                The mean of the noise is zero.
     """
-    if x.device.type == 'cuda':
-        x = x.cpu()
     noise = np.random.normal(loc=0, scale=sigma, size=x.shape)
 
-    return torch.tensor(
-        data=x.numpy() + noise,
-        dtype=torch.float32,
-        device=device,
-    )
+    return x + noise
 
 
 class AnomalyInjection(object):
@@ -159,7 +162,7 @@ class AnomalyInjection(object):
     
     def inject_anomaly(
         self,
-        window: Tensor,
+        window: Matrix,
         subsequence_length: Optional[int] = None,
         compression_factor: Optional[int] = None,
         start_idx: Optional[int] = None,
@@ -209,7 +212,7 @@ class AnomalyInjection(object):
             shapelet_factor:    Whether or not to add shapelet anomaly.
                                 Default False.
         """
-        window = window.clone()
+        window = window.copy()
 
         if subsequence_length is None:
             min_len = int(window.shape[0] * 0.1)
@@ -250,14 +253,14 @@ class AnomalyInjection(object):
 
         if shapelet_factor:
             degraded_subsequence = window[start_idx] \
-            + (torch.rand_like(window[start_idx]) * 0.1)
+            + (np.random.random_sample(window[start_idx].shape) * 0.1)
         
         window[start_idx: end_idx] = degraded_subsequence
 
         return np.squeeze(window)
     
-    def __call__(self, x: Tensor) -> Matrix:
-        window = x.clone()
+    def __call__(self, x: Matrix) -> Matrix:
+        window = x.copy()
 
         degraded_window = window.clone()
 
