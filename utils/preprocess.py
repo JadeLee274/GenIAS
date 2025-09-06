@@ -57,24 +57,6 @@ def overwrite_anomaly(data: Matrix) -> Matrix:
     return data
 
 
-def get_mean_std(x: Matrix, eps: float = 1e-8) -> Matrix:
-    """
-    Normalize each comlum of data using its mean and standard deviation.
-
-    Parameters:
-        x:   Input data.
-        eps: Constant that prevents dividing by zero.
-        
-    Returns:
-        Normlaized data with respect to maen and standard deviation.
-    """
-
-    mean = np.mean(x, axis=0)
-    std = np.std(x, axis=0)
-    
-    return mean, std
-
-
 def mean_std_normalize(x: Matrix, eps: float = 1e-8) -> Matrix:
     """
     Normalize each comlum of data using its mean and standard deviation.
@@ -153,6 +135,23 @@ def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
     return x_tilde_patched
 
 ##################### CARLA pretext processing functions #####################
+
+def get_mean_std(x: Matrix) -> Vector:
+    """
+    Gets the column-wise mean and standard deviations of data.
+
+    Parameters:
+        x:   Data.
+
+    Returns:
+        mean vector and standard deviation vector of x.
+    """
+
+    mean = np.mean(x, axis=0)
+    std = np.std(x, axis=0)
+    
+    return mean, std
+
 
 def noise_transformation(
     x: Matrix,
