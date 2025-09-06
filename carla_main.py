@@ -1,21 +1,55 @@
 import argparse
+from math import cos, pi
 from tqdm import tqdm
-from data_factory.loader import CARLADataset
+from faiss import IndexFlatL2
+from utils.common_import import *
+from data_factory.loader import PretextDataset
 from torch.utils.data import DataLoader
 import torch.optim as optim
 from carla.model import ContrastiveModel
-from utils.common_import import *
 from utils.loss import pretextloss, classificationloss
+
+
+def cosine_scheduler(
+    optimizer: optim.Adam,
+    current_epoch: int,
+    total_epochs: int = 30,
+    initial_learning_rate: float = 1e-3,
+    lr_decay_rate: float = 0.01,
+) -> None:
+    """
+    Customized cosine scheduler. Updates optimizer's learning rate.
+
+    Parameters:
+        optimizer:             Adam.
+        current_epoch:         Current training epoch.
+        total_epochs:          Total training epochs. Default 30.
+        initial_learning_rate: Initial learning rate. Defalut 1e-3.
+        lr_dacay_rate:         Decay rate of initial learning rate. 
+                               Default 0.01.
+    """
+    eta_min = initial_learning_rate * (lr_decay_rate ** 3)
+    scheduled_learning_rate = eta_min \
+    + (initial_learning_rate - eta_min) \
+    * (1 + cos(pi*current_epoch/total_epochs)) / 2
+
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = scheduled_learning_rate
+
+    return
 
 
 def pretext(
     dataset: str,
     window_size: int = 200,
+    epochs: int = 30,
     batch_size: int = 50,
     gpu_num: int = 0,
-    epochs: int = 30,
-    learning_rate: float = 1e-4,
+    learning_rate: float = 1e-3,
     resnet_save_interval: int = 5,
+    use_genias: bool = True,
+    skip_train: bool = False,
+    num_neighbors: int = 10,
 ) -> None:
     """
     Training code for CARLA pretext stage.
@@ -26,9 +60,17 @@ def pretext(
         batch_size:           Batch size. Default 50.
         gpu_num:              The model is trained in this GPU. Default 0.
         epochs:               Training epoch: Default 30.
-        learning_rate:        Learning rate. Default 1e-4.
+        learning_rate:        Initial learning rate. Default 1e-3.
         resnet_save_interval: The ResNet is saved once in this epoch. 
                               Default 5.
+        use_genias:           Whether or not to use GenIAS for creating 
+                              negative pair. Default True.
+        skip_train:           Whether or not to skip training. Use only when
+                              there is a pre-trained model from pretext stage.
+                              Default False.
+        num_neighbors:        Choose this number of nearese/furthers 
+                              neighborhood after the training loop.
+                              Default 10.
 
     Uses Resnet model and mlp head to map anchor, positive pair, and negative
     pair to the representation space (with dimension 128, in this case).
@@ -40,79 +82,105 @@ def pretext(
     The ResNet part is saved once in a resnet_save_interval epochs, in order to
     be used for the self-supervised stage of CARLA.
     """
-    train_dataset = CARLADataset(
+    train_dataset = PretextDataset(
         dataset=dataset,
         window_size=window_size,
+        normalize='mean_std',
         mode='train',
+        use_genias=use_genias,
     )
-    
-    train_loader = DataLoader(
-        dataset=train_dataset,
-        batch_size=batch_size,
-    )
-    
-    device = torch.device(f'cuda:{gpu_num}')
     
     model = ContrastiveModel(
         in_channels=train_dataset.data_dim,
         mid_channels=4,
-    ).to(device)
-    
-    optimizer = optim.Adam(
-        params=model.parameters(),
-        lr=learning_rate,
     )
-
-    criterion = pretextloss(
-        batch_size=batch_size,
-    ).to(device)
-
+    
+    
     ckpt_dir = os.path.join(f'checkpoints/carla_pretext/{dataset}')
     
     if not os.path.exists(ckpt_dir):
         os.makedirs(ckpt_dir, exist_ok=True)
 
-    model.train()
-    print('Training loop start...')
+    if not skip_train:
+        device = torch.device(f'cuda:{gpu_num}')
+        model = model.to(device)
+        criterion = pretextloss(batch_size=batch_size).to(device)
 
-    for epoch in range(epochs):
-        epoch_loss = 0.0
-        prev_loss = None
-        print(f'Epoch {epoch + 1} start')
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+        )
 
-        for data in tqdm(train_loader):
-            optimizer.zero_grad()
-            anchor, positive_pair, negative_pair = data
-            B, W, F = anchor.shape
-            anchor = anchor.to(device)
-            positive_pair = positive_pair.to(device)
-            negative_pair = negative_pair.to(device)
-            _inputs = torch.cat([anchor, positive_pair, negative_pair], dim=0)
-            _inputs = _inputs.view(3 * B, F, W)
-            _features = model(_inputs)
-            loss = criterion.forward(
-                features=_features,
-                current_loss=prev_loss,
-            )
-            loss.backward()
-            optimizer.step()
-            prev_loss = loss.item()
-            epoch_loss += prev_loss
-        
-        epoch_loss /= len(train_loader)
-        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+        optimizer = optim.Adam(
+            params=model.parameters(),
+            lr=learning_rate,
+        )
 
-        if epoch == 0 or (epoch + 1) % resnet_save_interval == 0:
-            torch.save(
-                obj={
-                    'resnet': model.resnet.state_dict(),
-                    'contrastive_head': model.contrastive_head.state_dict(),
-                    'optim': optimizer.state_dict(),
-                },
-                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
-            )
+        model.train()
+        print('Training loop start...')
+
+        for epoch in range(epochs):
+            epoch_loss = 0.0
+            prev_loss = None
+            print(f'Epoch {epoch + 1} start')
+
+            for data in tqdm(train_loader):
+                optimizer.zero_grad()
+                anchor, positive_pair, negative_pair = data
+                B, W, F = anchor.shape
+                anchor = anchor.to(device)
+                positive_pair = positive_pair.to(device)
+                negative_pair = negative_pair.to(device)
+                _inputs = torch.cat([anchor, positive_pair, negative_pair], dim=0)
+                _inputs = _inputs.view(3 * B, F, W)
+                _features = model(_inputs)
+                loss = criterion.forward(
+                    features=_features,
+                    current_loss=prev_loss,
+                )
+                loss.backward()
+                optimizer.step()
+                prev_loss = loss.item()
+                epoch_loss += prev_loss
+            
+            epoch_loss /= len(train_loader)
+            print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+
+            if epoch == 0 or (epoch + 1) % resnet_save_interval == 0:
+                torch.save(
+                    obj={
+                        'resnet': model.resnet.state_dict(),
+                        'contrastive_head': model.contrastive_head.state_dict(),
+                        'optim': optimizer.state_dict(),
+                    },
+                    f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
+                )
     
-    print('Done.')
+        print('Done.\n')
+    
+    else:
+        print('Skip training.\n')
+        ckpt = torch.load(
+            os.path.join(ckpt_dir, dataset, f'epoch_{epochs}.pt')
+        )
+        model.resnet.load_state_dict(ckpt['resnet'])
+        model.contrastive_head.load_state_dict(ckpt['contrastive_head'])
+    
+    print(
+        f'Begin choosing top {num_neighbors} nearest/furthest neighborhoods...'
+    )
+
+    model.eval()
+
+    timeseries_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+    # To be updated.
+
 
     return
 
@@ -150,7 +218,7 @@ def classification(
     than the probabilities such that the data is sent to another class; 
     abnormal otherwise.
     """
-    
+
     return 
 
 
