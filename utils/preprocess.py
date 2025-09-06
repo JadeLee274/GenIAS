@@ -57,6 +57,24 @@ def overwrite_anomaly(data: Matrix) -> Matrix:
     return data
 
 
+def get_mean_std(x: Matrix, eps: float = 1e-8) -> Matrix:
+    """
+    Normalize each comlum of data using its mean and standard deviation.
+
+    Parameters:
+        x:   Input data.
+        eps: Constant that prevents dividing by zero.
+        
+    Returns:
+        Normlaized data with respect to maen and standard deviation.
+    """
+
+    mean = np.mean(x, axis=0)
+    std = np.std(x, axis=0)
+    
+    return mean, std
+
+
 def mean_std_normalize(x: Matrix, eps: float = 1e-8) -> Matrix:
     """
     Normalize each comlum of data using its mean and standard deviation.
