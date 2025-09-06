@@ -325,8 +325,9 @@ class PretextDataset(object):
             negative_pairs = []
             
             for idx in range(self.windows.shape[0]):
+                window = self.windows[idx]
                 negative_pairs.append(
-                    self.anomaly_injection(self.windows[idx])
+                    self.anomaly_injection(window)
                 )
             
             self.negative_pairs = np.array(negative_pairs)
