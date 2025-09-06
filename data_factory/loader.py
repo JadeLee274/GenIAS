@@ -176,7 +176,6 @@ class PretextDataset(object):
         self,
         dataset: str,
         window_size: int = 200,
-        normalize: str = 'mean_std',
         mode: str = 'train',
         use_genias: bool = False,
     ) -> None:
@@ -227,14 +226,7 @@ class PretextDataset(object):
                 data = data[:, :-1]
                 labels = np.where(labels == 'Normal', 0, 1)
         
-        assert normalize in ['min_max', 'mean_std', 'none'], \
-        "'normalize' argument must be either 'min_max' or 'mean_std'."
-
-        if normalize == 'mean_std':
-            data = mean_std_normalize(data)
-        elif normalize == 'min_max':
-            data = min_max_normalize(data)
-
+        
         patch_coef = 0.3
 
         if dataset == 'MSL':
@@ -243,6 +235,10 @@ class PretextDataset(object):
             patch_coef = 0.2
 
         self.data = data
+        mean, std = get_mean_std(data)
+        self.mean = mean
+        self.std = std
+
         self.windows = convert_to_windows(data=data, window_size=window_size)
         self.data_dim = self.windows.shape[-1]
 
@@ -254,6 +250,8 @@ class PretextDataset(object):
         
         self.get_positive_pairs()
         self.get_negative_pairs(patch_coef=patch_coef)
+
+        
    
     def get_positive_pairs(self) -> None:
         positive_pairs = []
@@ -337,20 +335,37 @@ class PretextDataset(object):
         return
 
     def __len__(self) -> int:
-        return self.windows.shape
+        return self.windows.shape[0]
     
     def __getitem__(self, idx: int) -> Tuple[Matrix, Matrix, Matrix, Matrix]:
+        mean = self.mean
+        std = self.std
+        std = np.where(std==0.0, 1.0, std)
+
         if self.mode == 'train':
             window = self.windows[idx]
+            window = (window - mean) / std
+
             positive_pair = self.positive_pairs[idx]
+            positive_pair = (positive_pair - mean) / std
+
             negative_pair = self.negative_pairs[idx]
+            negative_pair = (negative_pair - mean) / std
+
             return window, positive_pair, negative_pair
         
         elif self.mode == 'test':
             window = self.windows[idx]
+            window = (window - mean) / std
+
             positive_pair = self.positive_pairs[idx]
+            positive_pair = (positive_pair - mean) / std
+
             negative_pair = self.negative_pairs[idx]
+            negative_pair = (negative_pair - mean) / std
+
             label = self.labels[idx]
+
             return window, positive_pair, negative_pair, label
 
 
