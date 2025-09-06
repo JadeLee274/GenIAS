@@ -204,6 +204,7 @@ class PretextDataset(object):
                     )
                 )
                 anomalies = data[labels == 1]
+        
         elif dataset == 'SWaT':
             if mode == 'train':
                 data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
@@ -255,7 +256,7 @@ class PretextDataset(object):
     def get_positive_pairs(self) -> None:
         positive_pairs = []
 
-        for idx in range(self.windows):
+        for idx in range(self.windows.shape[0]):
             if idx > 10:
                 positive_pair_idx = np.random.randint(idx - 10, idx)
                 positive_pair = self.windows[positive_pair_idx]
@@ -265,8 +266,7 @@ class PretextDataset(object):
             
             positive_pairs.append(positive_pair)
         
-        positive_pairs = np.array(positive_pairs)
-        self.positive_pairs = convert_to_windows(positive_pairs)
+        self.positive_pairs = np.array(positive_pairs)
         
         return
 
@@ -285,7 +285,7 @@ class PretextDataset(object):
 
             vae.load_state_dict(ckpt['model'])
 
-            negative_pairs = torch.empty_like(self.data)
+            negative_pairs = np.empty_like(self.data)
 
             for i in range(self.data.shape[0]//self.window_size + 1):
                 subdata = self.data[
@@ -293,13 +293,17 @@ class PretextDataset(object):
                 ]
 
                 if subdata.shape[0] != self.window_size:
-                    subdata_temp = torch.empty(self.window_size, self.data_dim)
+                    subdata_temp = np.empty(
+                        shape=(self.window_size, self.data_dim)
+                    )
                     subdata_temp[:subdata.shape[0]] = subdata
                     subdata = subdata_temp
                 
+                subdata = torch.tensor(subdata, dtype=torch.float32)
                 subdata = subdata.unsqueeze(0)
                 negative_pair = vae.forward(subdata)[-1]
                 negative_pair = negative_pair.squeeze(0)
+                negative_pair = np.array(negative_pair.detach())
 
                 if subdata.shape[0] != self.window_size:
                     negative_pair = negative_pair[:subdata.shape[0]]
