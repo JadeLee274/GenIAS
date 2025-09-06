@@ -121,9 +121,11 @@ def pretext(
         print('Training loop start...')
 
         for epoch in range(epochs):
+            print(f'Epoch {epoch + 1} start')
+
+            cosine_scheduler(optimizer=optimizer, current_epoch=epoch)
             epoch_loss = 0.0
             prev_loss = None
-            print(f'Epoch {epoch + 1} start')
 
             for data in tqdm(train_loader):
                 optimizer.zero_grad()
