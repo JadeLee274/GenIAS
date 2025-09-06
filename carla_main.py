@@ -10,6 +10,10 @@ from carla.model import ContrastiveModel
 from utils.loss import pretextloss, classificationloss
 
 
+def str2bool(v: str) -> bool:
+    return v.lower() in 'true'
+
+
 def cosine_scheduler(
     optimizer: optim.Adam,
     current_epoch: int,
@@ -31,7 +35,7 @@ def cosine_scheduler(
     eta_min = initial_learning_rate * (lr_decay_rate ** 3)
     scheduled_learning_rate = eta_min \
     + (initial_learning_rate - eta_min) \
-    * (1 + cos(pi*current_epoch/total_epochs)) / 2
+    * (1 + cos(pi * current_epoch / total_epochs)) / 2
 
     for param_group in optimizer.param_groups:
         param_group['lr'] = scheduled_learning_rate
@@ -47,7 +51,7 @@ def pretext(
     gpu_num: int = 0,
     learning_rate: float = 1e-3,
     resnet_save_interval: int = 5,
-    use_genias: bool = True,
+    use_genias: bool = False,
     skip_train: bool = False,
     num_neighbors: int = 10,
 ) -> None:
@@ -85,7 +89,6 @@ def pretext(
     train_dataset = PretextDataset(
         dataset=dataset,
         window_size=window_size,
-        normalize='mean_std',
         mode='train',
         use_genias=use_genias,
     )
@@ -94,7 +97,6 @@ def pretext(
         in_channels=train_dataset.data_dim,
         mid_channels=4,
     )
-    
     
     ckpt_dir = os.path.join(f'checkpoints/carla_pretext/{dataset}')
     
@@ -134,7 +136,12 @@ def pretext(
                 anchor = anchor.to(device)
                 positive_pair = positive_pair.to(device)
                 negative_pair = negative_pair.to(device)
-                _inputs = torch.cat([anchor, positive_pair, negative_pair], dim=0)
+
+                _inputs = torch.cat(
+                    tensors=[anchor, positive_pair, negative_pair],
+                    dim=0
+                ).float()
+
                 _inputs = _inputs.view(3 * B, F, W)
                 _features = model(_inputs)
                 loss = criterion.forward(
@@ -256,6 +263,13 @@ if __name__ == '__main__':
         help="Which GPU will be used. Default 0."
     )
     args.add_argument(
+        '--use-genias',
+        type=str2bool,
+        default=False,
+        help="Whether to use GenIAS for generating negative pairs." \
+        "Default False."
+    )
+    args.add_argument(
         '--pretext-epochs',
         type=int,
         default=30,
@@ -293,6 +307,7 @@ if __name__ == '__main__':
             epochs=config.pretext_epochs,
             learning_rate=config.learning_rate,
             resnet_save_interval=config.resnet_save_interval,
+            use_genias=config.use_genias,
         )
 
     if config.task == 'classification':
