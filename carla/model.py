@@ -121,6 +121,8 @@ class ClassificationModel(nn.Module):
             in_features=self.backbone_dim,
             out_features=num_classes,
             )
+
+        self._init_weights()
     
     def forward(
         self,
@@ -155,3 +157,14 @@ class ClassificationModel(nn.Module):
         ckpt = torch.load(resnet_path)
         self.resnet.load_state_dict(ckpt['model'])
         return None
+    
+    def _init_weights(self) -> None:
+        for param in self.parameters():
+            if isinstance(param, nn.Linear):
+                nn.init.xavier_normal_(param.weight)
+                nn.init.zeros_(param.bias)
+            elif isinstance(param, nn.Conv1d):
+                nn.init.kaiming_normal_(param.weight)
+                nn.init.zeros_(param.bias)
+
+        return
