@@ -3,8 +3,10 @@ from torch.utils.data import Dataset
 from genias.tcnvae import VAE
 from utils.common_import import *
 from utils.preprocess import *
+from carla.model import ContrastiveModel
 DATA_PATH = '/data/seungmin'
-VAE_PATH = '/data/home/tmdals274/genias/checkpoints/vae'
+VAE_PATH = '../checkpoints/vae'
+RESNET_PATH = '../checkpoints/carla_pretext'
 """
 Codes for loading data. This code follows the paper
 GenIAS: Generator for Instantiating Anomalies in Time Series,
@@ -176,7 +178,7 @@ class PretextDataset(object):
         window_size: int = 200,
         normalize: str = 'mean_std',
         mode: str = 'train',
-        use_genias: bool = True,
+        use_genias: bool = False,
     ) -> None:
         assert mode in ['train', 'test'], \
         "mode must be either 'train' or 'test'"
@@ -350,3 +352,113 @@ class PretextDataset(object):
             negative_pair = self.negative_pairs[idx]
             label = self.labels[idx]
             return window, positive_pair, negative_pair, label
+
+
+class CiassificationDataset(object):
+    def __init__(
+        self,
+        dataset: str,
+        window_size: int = 200,
+        normalize: str = 'mean_std',
+        num_neighbors: int = 10,
+        mode: str = 'train',
+    ) -> None:
+        assert mode in ['train', 'test'], \
+        "mode must be either 'train' or 'test'"
+
+        self.dataset = dataset
+        self.window_size = window_size
+        self.num_neighbors = num_neighbors
+        self.mode = mode
+
+        data = None
+        labels = None
+
+        if dataset in ['MSL', 'SMAP', 'SMD']:
+            if mode == 'train':
+                data = np.load(
+                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy'))
+            elif mode == 'test':
+                data = np.load(
+                    os.path.join(DATA_PATH, dataset, f'{dataset}_test.npy')
+                )
+                labels = np.load(
+                    os.path.join(
+                        DATA_PATH, dataset, f'{dataset}_test_label.npy'
+                    )
+                )
+                anomalies = data[labels == 1]
+        
+        elif dataset == 'SWaT':
+            if mode == 'train':
+                data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
+                data.drop(
+                    columns=[' Timestamp', 'Normal/Attack'],
+                    inplace=True,
+                )
+                data = data.values[:, 1:]
+            elif mode == 'test':
+                data = pd.read_csv(
+                    os.path.join(DATA_PATH, 'SWaT', 'SWaT_Abormal.csv')
+                )
+                data.drop(columns=[' Timestamp'], inplace=True)
+                data = data.values
+                labels = data[:, -1]
+                anomalies = data[labels == 1]
+                anomalies = anomalies[:, :-1]
+                data = data[:, :-1]
+                labels = np.where(labels == 'Normal', 0, 1)
+        
+        assert normalize in ['min_max', 'mean_std', 'none'], \
+        "'normalize' argument must be either 'min_max' or 'mean_std'."
+
+        if normalize == 'mean_std':
+            data = mean_std_normalize(data)
+        elif normalize == 'min_max':
+            data = min_max_normalize(data)
+
+        patch_coef = 0.3
+
+        if dataset == 'MSL':
+            patch_coef = 0.4
+        elif dataset in ['SMAP', 'Yahoo']:
+            patch_coef = 0.2
+
+        self.data = data
+        self.windows = convert_to_windows(data=data, window_size=window_size)
+        self.data_dim = self.windows.shape[-1]
+
+        if labels:
+            self.labels = convert_to_windows(
+                data=labels,
+                window_size=window_size
+            )
+
+        self._get_neighbors()
+
+
+        return
+    
+    def _get_neighbors(self) -> None:  
+        pretext_model = ContrastiveModel(in_channels=self.data_dim)
+        resnet = pretext_model.resnet
+        ckpt = torch.load(
+            os.path.join(RESNET_PATH, self.dataset, 'epoch_30.pt')
+        )
+        resnet.load_state_dict(ckpt['resnet'])
+
+        features = np.empty(
+            shape=(self.windows.shape[0], pretext_model.backbone_dim)
+        )
+
+        index_searcher = IndexFlatL2(d=pretext_model.backbone_dim)
+        index_searcher.add(features)
+        query = np.random.random(pretext_model.backbone_dim)
+        _, indices = index_searcher.search(
+            n=query.reshape(-1, 1).astype(np.float32),
+            x=pretext_model.backbone_dim,
+        )
+
+
+
+        return
