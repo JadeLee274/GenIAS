@@ -154,184 +154,193 @@ class GenIASDataset(object):
             return window, label
 
 
-class CARLADataset(Dataset):
+class PretextDataset(object):
     """
-    Training set for CARLA pretext training.
+    Dataset for CARLA pretext stage.
+    Consists of window, positive pair, negative pair when mode is 'train'; 
+    and label, in addition, when mode is 'test'.
 
     Parameters:
-        dataset:            Name of the dataset.
-        window_size:        Length of the sliding window. Default 200.
-        mode:               Either train or test. Default train.
-
-        convert_nan:        How to convert the data with NaN value. 
-                            Default 'nan_to_zero.'
-                            If dataset is 'GECCO_2018' or 'CECCO_2019', 
-                            then set it to 'overwrite.'
-
-        anomaly_processing: How to process anomalies of the training dataset. 
-                            Default 'drop.'
-
-        train_traio:        The ratio of train set. 
-                            For MSL, SMAP, SMD, SWaT, it is unnecessary.
-                            For GECCO_2018 and GECCO_2019, set it to 0.5.
-
-    Consists of anchor, the window of original data; positive pair, randomly 
-    selected from one of the former 10 windows before the anchor; negative pair,
-    the anomaly-injected-version of anchor.
+        dataset:     Name of dataset.
+        window_size: Window size of data, positive pair, negative pair.
+                     Default 200.
+        mode:        Whether the dataset is for trainig or test. 
+                     Default 'train'. It must be either 'train' or 'test'.
+        use_genias:  Whether or not to use GanIAS to create negative pairs.
+                     Default True.
     """
     def __init__(
         self,
         dataset: str,
         window_size: int = 200,
-        normalize: str = 'min_max',
+        normalize: str = 'mean_std',
         mode: str = 'train',
+        use_genias: bool = True,
     ) -> None:
-        data_path = os.path.join(DATA_PATH, dataset)
+        super().__init__()
+        assert mode in ['train', 'test'], \
+        "mode must be either 'train' or 'test'"
+
+        self.dataset = dataset
+        self.window_size = window_size
+        self.mode = mode
+        self.use_genias = use_genias
+        self.anomaly_injection = AnomalyInjection()
 
         data = None
+        labels = None
         
         if dataset in ['MSL', 'SMAP', 'SMD']:
             if mode == 'train':
-                data = np.load(os.path.join(data_path, f'{dataset}_train.npy'))
+                data = np.load(
+                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy'))
+            elif mode == 'test':
+                data = np.load(
+                    os.path.join(DATA_PATH, dataset, f'{dataset}_test.npy')
+                )
+                labels = np.load(
+                    os.path.join(
+                        DATA_PATH, dataset, f'{dataset}_test_label.npy'
+                    )
+                )
+                anomalies = data[labels == 1]
         elif dataset == 'SWaT':
             if mode == 'train':
-                data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
+                data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
                 data.drop(
                     columns=[' Timestamp', 'Normal/Attack'],
                     inplace=True,
                 )
                 data = data.values[:, 1:]
+            elif mode == 'test':
+                data = pd.read_csv(
+                    os.path.join(DATA_PATH, 'SWaT', 'SWaT_Abormal.csv')
+                )
+                data.drop(columns=[' Timestamp'], inplace=True)
+                data = data.values
+                labels = data[:, -1]
+                anomalies = data[labels == 1]
+                anomalies = anomalies[:, :-1]
+                data = data[:, :-1]
+                labels = np.where(labels == 'Normal', 0, 1)
         
-        data = torch.tensor(data, dtype=torch.float32)
-        self.dataset = dataset
-
-        self.data = data
-        self.data_len = data.shape[0]
-        self.data_dim = data.shape[1]
-
-        self.window_size = window_size
-
         assert normalize in ['min_max', 'mean_std', 'none'], \
         "'normalize' argument must be either 'min_max' or 'mean_std'."
 
-        self.normalize = normalize
+        if normalize == 'mean_std':
+            data = mean_std_normalize(data)
+        elif normalize == 'min_max':
+            data = min_max_normalize(data)
+
+        patch_coef = 0.3
 
         if dataset == 'MSL':
             patch_coef = 0.4
         elif dataset in ['SMAP', 'Yahoo']:
             patch_coef = 0.2
 
-        self.get_windows()
+        self.data = data
+        self.windows = convert_to_windows(data=data, window_size=window_size)
+        self.data_dim = self.windows.shape[-1]
+
+        if labels:
+            self.labels = convert_to_windows(
+                data=labels,
+                window_size=window_size
+            )
+        
         self.get_positive_pairs()
         self.get_negative_pairs(patch_coef=patch_coef)
-             
-    def __len__(self) -> int:
-        return self.data.shape[0] - self.window_size + 1
-    
-    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor, Tensor]:
-        anchor = self.windows[idx]
-        positive_pair = self.positive_windows[idx]
-        negative_pair = self.negative_windows[idx]
-
-        if self.normalize == 'min_max':
-            anchor = min_max_normalize(anchor)
-            positive_pair = min_max_normalize(positive_pair)
-            negative_pair = min_max_normalize(negative_pair)
-
-        elif self.normalize == 'mean_std':
-            anchor = mean_std_normalize(anchor)
-            positive_pair = mean_std_normalize(positive_pair)
-            negative_pair = mean_std_normalize(negative_pair)
-        
-        return anchor, positive_pair, negative_pair
-
-    def get_windows(self) -> None:
-        windows = torch.empty(
-            self.data_len - self.window_size + 1,
-            self.window_size,
-            self.data_dim,
-        )
-        
-        for i in range(self.data_len - self.window_size + 1):
-            windows[i] = self.data[i: i+self.window_size]
-        
-        self.windows = torch.tensor(windows)
-
-        return
-
+   
     def get_positive_pairs(self) -> None:
-        positive_pairs = torch.empty(
-            self.data_len - self.window_size + 1,
-            self.window_size,
-            self.data_dim
-        )
+        positive_pairs = []
 
-        for i in range(positive_pairs.shape[0]):
-            if i == 0:
-                idx = i
-            elif 0 < i and i <= 10:
-                idx = np.random.randint(0, i)
+        for idx in range(self.windows):
+            if idx > 10:
+                positive_pair_idx = np.random.randint(idx - 10, idx)
+                positive_pair = self.windows[positive_pair_idx]
             else:
-                idx = np.random.randint(i - 10, i)
-            positive_pairs[i] = self.windows[idx]
-        
-        self.positive_windows = positive_pairs
-
-        return
-    
-    def get_negative_pairs(self, patch_coef: float) -> None:
-        vae = VAE(
-            window_size=self.window_size,
-            data_dim=self.data_dim,
-            latent_dim=100 if self.data_dim != 1 else 50,
-            depth=10,
-        )
-
-        ckpt = torch.load(
-            os.path.join(VAE_PATH, self.dataset, 'epoch_1000.pt')
-        )
-        vae.load_state_dict(ckpt['model'])
-
-        negative_pairs = torch.empty_like(self.data)
-        data_len = self.data.shape[0]
-
-        for i in range(data_len//self.window_size + 1):
-            subdata = self.data[
-                i * self.window_size: (i + 1) * self.window_size
-            ]
+                positive_pair = self.windows[idx]
+                positive_pair = noise_transformation(x=positive_pair)
             
-            if subdata.shape[0] != self.window_size:
-                subdata_temp = torch.empty(self.window_size, self.data_dim)
-                subdata_temp[:subdata.shape[0]] = subdata
-                subdata = subdata_temp
-
-            subdata = subdata.unsqueeze(0)
-            negative_pair = vae.forward(subdata)[-1]
-            negative_pair = negative_pair.squeeze(0)
-
-            if subdata.shape[0] != self.window_size:
-                negative_pair = negative_pair[:subdata.shape[0]]
-
-            negative_pairs[
-                i * self.window_size: (i + 1) * self.window_size,
-            ] \
-            = negative_pair
+            positive_pairs.append(positive_pair)
         
-        negative_pairs = patch(
-        x=self.data,
-        x_tilde=negative_pairs,
-        tau=patch_coef
-        )
+        positive_pairs = np.array(positive_pairs)
+        self.positive_pairs = convert_to_windows(positive_pairs)
+        
+        return
 
-        negative_windows = torch.empty(
-            self.data_len - self.window_size + 1,
-            self.window_size,
-            self.data_dim
-        )
+    def get_negative_pairs(self, patch_coef: float) -> None:
+        if self.use_genias:
+            vae = VAE(
+                window_size=self.window_size,
+                data_dim=self.data_dim,
+                latent_dim = 100 if self.data_dim != 0 else 50,
+                depth=10,
+            )
 
-        for i in range(self.data_dim - self.window_size + 1):
-            negative_windows[i] = negative_pairs[i: i+self.window_size]
+            ckpt = torch.load(
+                os.path.join(VAE_PATH, self.dataset, 'epoch_1000.pt')
+            )
 
-        self.negative_windows = negative_windows
+            vae.load_state_dict(ckpt['model'])
+
+            negative_pairs = torch.empty_like(self.data)
+
+            for i in range(self.data.shape[0]//self.window_size + 1):
+                subdata = self.data[
+                    i * self.window_size: (i + 1) * self.window_size
+                ]
+
+                if subdata.shape[0] != self.window_size:
+                    subdata_temp = torch.empty(self.window_size, self.data_dim)
+                    subdata_temp[:subdata.shape[0]] = subdata
+                    subdata = subdata_temp
+                
+                subdata = subdata.unsqueeze(0)
+                negative_pair = vae.forward(subdata)[-1]
+                negative_pair = negative_pair.squeeze(0)
+
+                if subdata.shape[0] != self.window_size:
+                    negative_pair = negative_pair[:subdata.shape[0]]
+                
+                negative_pairs[
+                    i * self.window_size: (i + 1) * self.window_size
+                ] \
+                = negative_pair
+
+            negative_pairs = patch(
+                x=self.data,
+                x_tilde=negative_pairs,
+                tau=patch_coef
+            )
+
+            self.negative_pairs = convert_to_windows(negative_pairs)
+        
+        else:
+            negative_pairs = []
+            
+            for idx in range(self.windows.shape[0]):
+                negative_pairs.append(
+                    self.anomaly_injection(self.windows[idx])
+                )
+            
+            self.negative_pairs = np.array(negative_pairs)
 
         return
+
+    def __len__(self) -> int:
+        return self.windows.shape
+    
+    def __getitem__(self, idx: int) -> Tuple[Matrix, Matrix, Matrix, Matrix]:
+        if self.mode == 'train':
+            window = self.windows[idx]
+            positive_pair = self.positive_pairs[idx]
+            negative_pair = self.negative_pairs[idx]
+            return window, positive_pair, negative_pair
+        elif self.mode == 'test':
+            window = self.windows[idx]
+            positive_pair = self.positive_pairs[idx]
+            negative_pair = self.negative_pairs[idx]
+            label = self.labels[idx]
+            return window, positive_pair, negative_pair, label
