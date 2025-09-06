@@ -178,7 +178,6 @@ class PretextDataset(object):
         mode: str = 'train',
         use_genias: bool = True,
     ) -> None:
-        super().__init__()
         assert mode in ['train', 'test'], \
         "mode must be either 'train' or 'test'"
 
@@ -344,6 +343,7 @@ class PretextDataset(object):
             positive_pair = self.positive_pairs[idx]
             negative_pair = self.negative_pairs[idx]
             return window, positive_pair, negative_pair
+        
         elif self.mode == 'test':
             window = self.windows[idx]
             positive_pair = self.positive_pairs[idx]
