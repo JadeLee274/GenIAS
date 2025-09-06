@@ -120,13 +120,13 @@ def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
     then the column remains still, converted to normal data otherwise.
     """
     data_dim = x.shape[1]
-    x_tilde_patched = torch.empty_like(x) # torch.emty_like(x_tilde)
+    x_tilde_patched = np.empty_like(x) # torch.emty_like(x_tilde)
 
     for d in range(data_dim):
         x_d = x[:, d]
         x_tilde_d = x_tilde[:, d]
-        deviation_d = torch.sum((x_d - x_tilde_d) ** 2)
-        amplitude_d = torch.max(x_d) - torch.min(x_d)
+        deviation_d = np.sum((x_d - x_tilde_d) ** 2)
+        amplitude_d = np.max(x_d) - np.min(x_d)
         if deviation_d > tau * amplitude_d:
             x_tilde_patched[:, d] = x_tilde[:, d]
         else:
