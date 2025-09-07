@@ -70,7 +70,7 @@ def pretext(
                               negative pair. Default True.
         num_neighbors:        Choose this number of nearese/furthers 
                               neighborhood after the training loop.
-                              Default 10.
+                              Default 5.
 
     Uses Resnet model and mlp head to map anchor, positive pair, and negative
     pair to the representation space (with dimension 128, in this case).
