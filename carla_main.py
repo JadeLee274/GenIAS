@@ -170,10 +170,8 @@ def pretext(
         print('Done.\n')
     
     else:
-        print('Skip training')
+        print('Skip training\n')
         
-    print(f'Selecting top-{num_neighbors} nearest/furthest neighbors...')
-
     model = ContrastiveModel(
         in_channels=train_dataset.data_dim,
         mid_channels=4,
@@ -195,17 +193,19 @@ def pretext(
     anchor_features = []
     negative_features = []
 
-    for batch in timeseries_loader:
+    print('Loading features of each anchor and its negative pair.')
+
+    for batch in tqdm(timeseries_loader):
         anchor, _, negative_pair = batch
-        anchor = anchor.to(device).float()
-        negative_pair = negative_pair.to(device).float()
-        anchor_feature = resnet(anchor).detach().numpy().cpu()
-        negative_feature = resnet(negative_pair).detach().numpy().cpu()
+        anchor = anchor.to(device).float().transpose(1, 2)
+        negative_pair = negative_pair.to(device).float().transpose(1, 2)
+        anchor_feature = resnet(anchor).detach().cpu()
+        negative_feature = resnet(negative_pair).detach().cpu()
         anchor_features.append(anchor_feature)
         negative_features.append(negative_feature)
     
-    anchor_features = np.array(anchor_features)
-    negative_features = np.array(negative_features)
+    anchor_features = torch.cat(anchor_features, dim=0).numpy()
+    negative_features = torch.cat(negative_features, dim=0).numpy()
 
     features = np.concatenate([anchor_features, negative_features], axis=0)
 
@@ -215,9 +215,11 @@ def pretext(
     index_searcher = IndexFlatL2(feature_dim)
     index_searcher.add(features)
 
-    for anchor_feature in anchor_features:
+    print(f'\nSelecting top-{num_neighbors} nearest/furthest neighbors...')
+
+    for anchor_feature in tqdm(anchor_features):
         query = anchor_feature.reshape(1, -1)
-        _, distance_based_indices = index_searcher(query, len(features))
+        _, distance_based_indices = index_searcher.search(query, len(features))
         distance_based_indices = distance_based_indices.reshape(-1)
         nearest_indices = distance_based_indices[:num_neighbors]
         furthest_indices = distance_based_indices[-num_neighbors:]
@@ -281,6 +283,12 @@ if __name__ == '__main__':
         '--dataset',
         type=str,
         help="Name of the dataset."
+    )
+    args.add_argument(
+        '--skip-train',
+        type=str2bool,
+        default=False,
+        help="Whether to skip training or not."
     )
     args.add_argument(
         '--window-size',
