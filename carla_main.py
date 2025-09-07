@@ -52,6 +52,8 @@ def pretext(
     learning_rate: float = 1e-3,
     resnet_save_interval: int = 5,
     use_genias: bool = False,
+    skip_train: bool = True,
+    num_neighbors: int = 10,
 ) -> None:
     """
     Training code for CARLA pretext stage.
@@ -102,68 +104,129 @@ def pretext(
         os.makedirs(ckpt_dir, exist_ok=True)
 
     device = torch.device(f'cuda:{gpu_num}')
-    model = model.to(device)
-    criterion = pretextloss(batch_size=batch_size).to(device)
 
-    train_loader = DataLoader(
+    if not skip_train:
+        model = model.to(device)
+        criterion = pretextloss(batch_size=batch_size).to(device)
+
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+        )
+
+        optimizer = optim.Adam(
+            params=model.parameters(),
+            lr=learning_rate,
+        )
+
+        model.train()
+        print('Training loop start...')
+
+        for epoch in range(epochs):
+            print(f'Epoch {epoch + 1} start')
+
+            cosine_scheduler(optimizer=optimizer, current_epoch=epoch)
+            epoch_loss = 0.0
+            prev_loss = None
+
+            for data in tqdm(train_loader):
+                optimizer.zero_grad()
+                anchor, positive_pair, negative_pair = data
+                B, W, F = anchor.shape
+                anchor = anchor.to(device)
+                positive_pair = positive_pair.to(device)
+                negative_pair = negative_pair.to(device)
+
+                _inputs = torch.cat(
+                    tensors=[anchor, positive_pair, negative_pair],
+                    dim=0
+                ).float()
+
+                _inputs = _inputs.view(3 * B, F, W)
+                _features = model(_inputs)
+                loss = criterion.forward(
+                    features=_features,
+                    current_loss=prev_loss,
+                )
+                loss.backward()
+                optimizer.step()
+                prev_loss = loss.item()
+                epoch_loss += prev_loss
+            
+            epoch_loss /= len(train_loader)
+            print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+
+            if epoch == 0 or (epoch + 1) % resnet_save_interval == 0:
+                torch.save(
+                    obj={
+                        'resnet': model.resnet.state_dict(),
+                        'contrastive_head': model.contrastive_head.state_dict(),
+                        'optim': optimizer.state_dict(),
+                    },
+                    f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
+                )
+
+        print('Done.\n')
+    
+    else:
+        print('Skip training')
+        
+    print(f'Selecting top-{num_neighbors} nearest/furthest neighbors...')
+
+    model = ContrastiveModel(
+        in_channels=train_dataset.data_dim,
+        mid_channels=4,
+    )
+    feature_dim = model.backbone_dim
+
+    resnet = model.resnet
+    ckpt = torch.load(os.path.join(ckpt_dir, f'epoch_{epochs}.pt'))
+    resnet.load_state_dict(ckpt['resnet'])
+    resnet = resnet.to(device)
+    resnet.eval()
+
+    timeseries_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=False,
     )
 
-    optimizer = optim.Adam(
-        params=model.parameters(),
-        lr=learning_rate,
-    )
+    anchor_features = []
+    negative_features = []
 
-    model.train()
-    print('Training loop start...')
+    for batch in timeseries_loader:
+        anchor, _, negative_pair = batch
+        anchor = anchor.to(device).float()
+        negative_pair = negative_pair.to(device).float()
+        anchor_feature = resnet(anchor).detach().numpy().cpu()
+        negative_feature = resnet(negative_pair).detach().numpy().cpu()
+        anchor_features.append(anchor_feature)
+        negative_features.append(negative_feature)
+    
+    anchor_features = np.array(anchor_features)
+    negative_features = np.array(negative_features)
 
-    for epoch in range(epochs):
-        print(f'Epoch {epoch + 1} start')
+    features = np.concatenate([anchor_features, negative_features], axis=0)
 
-        cosine_scheduler(optimizer=optimizer, current_epoch=epoch)
-        epoch_loss = 0.0
-        prev_loss = None
+    nearest_neighbors = []
+    furthest_neighbors = []
 
-        for data in tqdm(train_loader):
-            optimizer.zero_grad()
-            anchor, positive_pair, negative_pair = data
-            B, W, F = anchor.shape
-            anchor = anchor.to(device)
-            positive_pair = positive_pair.to(device)
-            negative_pair = negative_pair.to(device)
+    index_searcher = IndexFlatL2(feature_dim)
+    index_searcher.add(features)
 
-            _inputs = torch.cat(
-                tensors=[anchor, positive_pair, negative_pair],
-                dim=0
-            ).float()
+    for anchor_feature in anchor_features:
+        query = anchor_feature.reshape(1, -1)
+        _, distance_based_indices = index_searcher(query, len(features))
+        distance_based_indices = distance_based_indices.reshape(-1)
+        nearest_indices = distance_based_indices[:num_neighbors]
+        furthest_indices = distance_based_indices[-num_neighbors:]
+        nearest_neighbors.append(features[nearest_indices])
+        furthest_neighbors.append(features[furthest_indices])
+    
+    nearest_neighbors = np.array(nearest_neighbors)
+    furthest_neighbors = np.array(furthest_neighbors)
 
-            _inputs = _inputs.view(3 * B, F, W)
-            _features = model(_inputs)
-            loss = criterion.forward(
-                features=_features,
-                current_loss=prev_loss,
-            )
-            loss.backward()
-            optimizer.step()
-            prev_loss = loss.item()
-            epoch_loss += prev_loss
-        
-        epoch_loss /= len(train_loader)
-        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
-
-        if epoch == 0 or (epoch + 1) % resnet_save_interval == 0:
-            torch.save(
-                obj={
-                    'resnet': model.resnet.state_dict(),
-                    'contrastive_head': model.contrastive_head.state_dict(),
-                    'optim': optimizer.state_dict(),
-                },
-                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
-            )
-
-    print('Done.\n')
     
     return
 
@@ -172,6 +235,7 @@ def classification(
     dataset: str,
     window_size: int = 200,
     batch_size: int = 100,
+    num_neighbors: int = 10,
     gpu_num: int = 0,
     epochs: int = 100,
     learning_rate: float = 1e-4,
