@@ -173,6 +173,10 @@ def noise_transformation(
 
 
 class AnomalyInjection(object):
+    """
+    This is a modified version of SubAnomaly in CARLA code.
+    This if for injectind anomaly to the normal window.
+    """
     def __init__(self, portion_len: float = 0.99) -> None:
         self.portion_len = portion_len
         return
