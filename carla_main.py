@@ -52,8 +52,7 @@ def pretext(
     learning_rate: float = 1e-3,
     resnet_save_interval: int = 5,
     use_genias: bool = False,
-    skip_train: bool = True,
-    num_neighbors: int = 10,
+    num_neighbors: int = 5,
 ) -> None:
     """
     Training code for CARLA pretext stage.
@@ -69,9 +68,6 @@ def pretext(
                               Default 5.
         use_genias:           Whether or not to use GenIAS for creating 
                               negative pair. Default True.
-        skip_train:           Whether or not to skip training. Use only when
-                              there is a pre-trained model from pretext stage.
-                              Default False.
         num_neighbors:        Choose this number of nearese/furthers 
                               neighborhood after the training loop.
                               Default 10.
@@ -105,83 +101,70 @@ def pretext(
 
     device = torch.device(f'cuda:{gpu_num}')
 
-    if not skip_train:
-        model = model.to(device)
-        criterion = pretextloss(batch_size=batch_size).to(device)
+    model = model.to(device)
+    criterion = pretextloss(batch_size=batch_size).to(device)
 
-        train_loader = DataLoader(
-            dataset=train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-        )
-
-        optimizer = optim.Adam(
-            params=model.parameters(),
-            lr=learning_rate,
-        )
-
-        model.train()
-        print('Training loop start...')
-
-        for epoch in range(epochs):
-            print(f'Epoch {epoch + 1} start')
-
-            cosine_scheduler(optimizer=optimizer, current_epoch=epoch)
-            epoch_loss = 0.0
-            prev_loss = None
-
-            for data in tqdm(train_loader):
-                optimizer.zero_grad()
-                anchor, positive_pair, negative_pair = data
-                B, W, F = anchor.shape
-                anchor = anchor.to(device)
-                positive_pair = positive_pair.to(device)
-                negative_pair = negative_pair.to(device)
-
-                _inputs = torch.cat(
-                    tensors=[anchor, positive_pair, negative_pair],
-                    dim=0
-                ).float()
-
-                _inputs = _inputs.view(3 * B, F, W)
-                _features = model(_inputs)
-                loss = criterion.forward(
-                    features=_features,
-                    current_loss=prev_loss,
-                )
-                loss.backward()
-                optimizer.step()
-                prev_loss = loss.item()
-                epoch_loss += prev_loss
-            
-            epoch_loss /= len(train_loader)
-            print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
-
-            if epoch == 0 or (epoch + 1) % resnet_save_interval == 0:
-                torch.save(
-                    obj={
-                        'resnet': model.resnet.state_dict(),
-                        'contrastive_head': model.contrastive_head.state_dict(),
-                        'optim': optimizer.state_dict(),
-                    },
-                    f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
-                )
-
-        print('Done.\n')
-    
-    else:
-        print('Skip training\n')
-        
-    model = ContrastiveModel(
-        in_channels=train_dataset.data_dim,
-        mid_channels=4,
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
     )
-    feature_dim = model.backbone_dim
 
+    optimizer = optim.Adam(
+        params=model.parameters(),
+        lr=learning_rate,
+    )
+
+    model.train()
+    print('Training loop start...')
+
+    for epoch in range(epochs):
+        print(f'Epoch {epoch + 1} start')
+
+        cosine_scheduler(optimizer=optimizer, current_epoch=epoch)
+        epoch_loss = 0.0
+        prev_loss = None
+
+        for data in tqdm(train_loader):
+            optimizer.zero_grad()
+            anchor, positive_pair, negative_pair = data
+            B, W, F = anchor.shape
+            anchor = anchor.to(device)
+            positive_pair = positive_pair.to(device)
+            negative_pair = negative_pair.to(device)
+
+            _inputs = torch.cat(
+                tensors=[anchor, positive_pair, negative_pair],
+                dim=0
+            ).float()
+
+            _inputs = _inputs.view(3 * B, F, W)
+            _features = model(_inputs)
+            loss = criterion.forward(
+                features=_features,
+                current_loss=prev_loss,
+            )
+            loss.backward()
+            optimizer.step()
+            prev_loss = loss.item()
+            epoch_loss += prev_loss
+        
+        epoch_loss /= len(train_loader)
+        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+
+        if epoch == 0 or (epoch + 1) % resnet_save_interval == 0:
+            torch.save(
+                obj={
+                    'resnet': model.resnet.state_dict(),
+                    'contrastive_head': model.contrastive_head.state_dict(),
+                    'optim': optimizer.state_dict(),
+                },
+                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
+            )
+
+    print('Done.\n')
+       
     resnet = model.resnet
-    ckpt = torch.load(os.path.join(ckpt_dir, f'epoch_{epochs}.pt'))
-    resnet.load_state_dict(ckpt['resnet'])
-    resnet = resnet.to(device)
     resnet.eval()
 
     timeseries_loader = DataLoader(
@@ -209,11 +192,21 @@ def pretext(
 
     features = np.concatenate([anchor_features, negative_features], axis=0)
 
+    neighbors_save_dir = f'classification_dataset/{dataset}'
+    if not os.path.exists(neighbors_save_dir):
+        os.makedirs(neighbors_save_dir, exist_ok=True)
+
     nearest_neighbors = []
     furthest_neighbors = []
 
+    feature_dim = model.backbone_dim
     index_searcher = IndexFlatL2(feature_dim)
     index_searcher.add(features)
+
+    anchor_and_negative_pairs = np.concatenate(
+        [train_dataset.windows, train_dataset.negative_pairs],
+        axis=0,
+    )
 
     print(f'\nSelecting top-{num_neighbors} nearest/furthest neighbors...')
 
@@ -223,12 +216,28 @@ def pretext(
         distance_based_indices = distance_based_indices.reshape(-1)
         nearest_indices = distance_based_indices[:num_neighbors]
         furthest_indices = distance_based_indices[-num_neighbors:]
-        nearest_neighbors.append(features[nearest_indices])
-        furthest_neighbors.append(features[furthest_indices])
+        nearest_neighbors.append(
+            anchor_and_negative_pairs[nearest_indices]
+        )
+        furthest_neighbors.append(
+            anchor_and_negative_pairs[furthest_indices]
+        )
     
+    print('\nSaving nearest neighborhoods...')
     nearest_neighbors = np.array(nearest_neighbors)
-    furthest_neighbors = np.array(furthest_neighbors)
+    np.save(
+        file=os.path.join(neighbors_save_dir, 'nearest_neighborhoods.npy'),
+        arr=nearest_neighbors,
+    )
 
+    print('Saving furthest neighborhoods...')
+    furthest_neighbors = np.array(furthest_neighbors)
+    np.save(
+        file=os.path.join(neighbors_save_dir, 'furthest_neighborhoods.npy'),
+        arr=furthest_neighbors,
+    )
+
+    print('\nSelecting process done. Move on to the classification stage.')
     
     return
 
@@ -283,12 +292,6 @@ if __name__ == '__main__':
         '--dataset',
         type=str,
         help="Name of the dataset."
-    )
-    args.add_argument(
-        '--skip-train',
-        type=str2bool,
-        default=False,
-        help="Whether to skip training or not."
     )
     args.add_argument(
         '--window-size',
