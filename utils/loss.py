@@ -354,7 +354,7 @@ class classificationloss(nn.Module):
         )
 
         total_loss = consistency_loss \
-                    - self.inconsistency_weight * inconsistency_loss \
+                    + self.inconsistency_weight * inconsistency_loss \
                     - self.entropy_weight * entropy_loss
         
         return total_loss, \
