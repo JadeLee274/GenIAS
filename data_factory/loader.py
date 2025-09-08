@@ -5,7 +5,7 @@ from utils.common_import import *
 from utils.preprocess import *
 DATA_PATH = '/data/seungmin'
 VAE_PATH = '../checkpoints/vae'
-RESNET_PATH = '../checkpoints/carla_pretext'
+NEIGHBORHOODS_PATH = '/data/home/tmdals274/genias/classification_dataset'
 """
 Codes for loading data. These codes follows the papers
 
@@ -435,7 +435,7 @@ class ClassificationDataset(object):
 
         self.anchors = convert_to_windows(data=data, window_size=window_size)
         
-        neighbors_dir = f'../classification_dataset/{dataset}'
+        neighbors_dir = os.path.join(NEIGHBORHOODS_PATH, dataset)
 
         self.nearest_neighbors = np.load(
             os.path.join(neighbors_dir, 'nearest_neighbors.npy')
