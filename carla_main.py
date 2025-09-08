@@ -163,6 +163,23 @@ def pretext(
             )
 
     print('Done.\n')
+
+    classification_data_dir = f'classification_dataset/{dataset}'
+    
+    if not os.path.exists(classification_data_dir):
+        os.makedirs(classification_data_dir, exist_ok=True) 
+
+    print(f'\nSaving anchor dataset for classification task...')
+    np.save(
+        file=os.path.join(classification_data_dir, 'anchor.npy'),
+        arr=train_dataset.windows,
+    )
+
+    print(f'Saving negative pair dataset for classification task...')
+    np.save(
+        file=os.path.join(classification_data_dir, 'negative_pair.npy'),
+        arr=train_dataset.negative_pairs,
+    )
        
     resnet = model.resnet
     resnet.eval()
@@ -190,11 +207,9 @@ def pretext(
     anchor_features = torch.cat(anchor_features, dim=0).numpy()
     negative_features = torch.cat(negative_features, dim=0).numpy()
 
-    features = np.concatenate([anchor_features, negative_features], axis=0)
+    features = np.concatenate([anchor_features, negative_features], axis=0) 
 
-    neighbors_save_dir = f'classification_dataset/{dataset}'
-    if not os.path.exists(neighbors_save_dir):
-        os.makedirs(neighbors_save_dir, exist_ok=True)
+    print(f'\nSelecting top-{num_neighbors} nearest/furthest neighbors...')
 
     nearest_neighbors = []
     furthest_neighbors = []
@@ -207,8 +222,6 @@ def pretext(
         [train_dataset.windows, train_dataset.negative_pairs],
         axis=0,
     )
-
-    print(f'\nSelecting top-{num_neighbors} nearest/furthest neighbors...')
 
     for anchor_feature in tqdm(anchor_features):
         query = anchor_feature.reshape(1, -1)
@@ -226,14 +239,14 @@ def pretext(
     print('\nSaving nearest neighborhoods...')
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
-        file=os.path.join(neighbors_save_dir, 'nearest_neighborhoods.npy'),
+        file=os.path.join(classification_data_dir, 'nearest_neighbors.npy'),
         arr=nearest_neighbors,
     )
 
     print('Saving furthest neighborhoods...')
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
-        file=os.path.join(neighbors_save_dir, 'furthest_neighborhoods.npy'),
+        file=os.path.join(classification_data_dir, 'furthest_neighbors.npy'),
         arr=furthest_neighbors,
     )
 
