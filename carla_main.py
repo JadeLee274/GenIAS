@@ -322,12 +322,17 @@ def classification(
         for batch in tqdm(train_loader):
             optimizer.zero_grad()
             anchor, nearest_neighbors, furthest_neighbors = batch
-            anchor = anchor.to(device)
+            anchor = anchor.to(device).float()
+            anchor = anchor.transpose(-2, -1)
             anchor = model.forward(anchor)
 
-            nearest_neighbors = nearest_neighbors.to(device)
-            furthest_neighbors = furthest_neighbors.to(device)
+            nearest_neighbors = nearest_neighbors.to(device).float()
+            furthest_neighbors = furthest_neighbors.to(device).float()
+
             loss = torch.zeros(1, device=device)
+            consistency_loss = 0.0
+            inconsistency_loss = 0.0
+            entropy_loss = 0.0
 
             for i in range(nearest_neighbors.shape[1]):
                 nearest = nearest_neighbors[:, i].transpose(-2, -1)
@@ -336,16 +341,29 @@ def classification(
                 nearest = model.forward(nearest)
                 furthest = model.forward(furthest)
 
-                sub_loss = criterion.forward(anchor, nearest, furthest)[0]
+                sub_loss, sub_consistency, sub_inconsistency, sub_entropy\
+                = criterion.forward(anchor, nearest, furthest)
+                
                 loss += sub_loss
+                consistency_loss += sub_consistency
+                inconsistency_loss += sub_inconsistency
+                entropy_loss += sub_entropy
 
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
         
         epoch_loss /= len(train_loader)
+        consistency_loss /= len(train_loader)
+        inconsistency_loss /= len(train_loader)
+        entropy_loss /= len(train_loader)
         
-        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+        print(f'Epoch {epoch + 1} finished.')
+        print(f'- Consistency loss: {consistency_loss:.4e}')
+        print(f'- Inconsistency loss: {inconsistency_loss:.4e}')
+        print(f'- Entropy loss: {entropy_loss:.4e}')
+        print(f'- Total loss: {epoch_loss:.4e}')
+
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
