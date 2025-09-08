@@ -1,5 +1,8 @@
 # Ignora particular file.
 debug.py
+dataset.py
+pretext.py
+classification.py
 
 # Ignore all extensions.
 *.csv
