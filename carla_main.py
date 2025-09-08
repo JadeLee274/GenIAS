@@ -11,6 +11,14 @@ from utils.loss import pretextloss, classificationloss
 
 
 def str2bool(v: str) -> bool:
+    """
+    Changes string to bool.
+
+    Parameters:
+        v: String. Must be either 'True' or 'False'.
+    """
+    assert v in ['True', 'False'], "string must be either 'True' or 'False'"
+
     return v.lower() in 'true'
 
 
