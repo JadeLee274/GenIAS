@@ -163,12 +163,7 @@ def pretext(
             )
 
     print('Done.\n')
-
-    classification_data_dir = f'classification_dataset/{dataset}'
-    
-    if not os.path.exists(classification_data_dir):
-        os.makedirs(classification_data_dir, exist_ok=True) 
-       
+      
     resnet = model.resnet
     resnet.eval()
 
@@ -223,6 +218,11 @@ def pretext(
         furthest_neighbors.append(
             anchor_and_negative_pairs[furthest_indices]
         )
+
+    classification_data_dir = f'classification_dataset/{dataset}'
+    
+    if not os.path.exists(classification_data_dir):
+        os.makedirs(classification_data_dir, exist_ok=True)
     
     print('\nSaving nearest neighborhoods...')
     nearest_neighbors = np.array(nearest_neighbors)
