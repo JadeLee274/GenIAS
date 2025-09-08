@@ -3,7 +3,7 @@ from .resnet import ResNet
 RESNET_PATH = '../checkpoints/resnet'
 
 
-class ContrastiveModel(nn.Module):
+class PretextModel(nn.Module):
     """
     Model for Pretext stage of CARLA.
     
@@ -29,7 +29,7 @@ class ContrastiveModel(nn.Module):
             in_channels=in_channels,
             mid_channels=mid_channels,
         )
-        self.backbone_dim = 2 * mid_channels
+        self.feature_dim = 2 * mid_channels
         self.head = head
 
         assert head in ['linear', 'mlp'], \
@@ -37,18 +37,18 @@ class ContrastiveModel(nn.Module):
 
         if head == 'linear':
             self.contrastive_head = nn.Linear(
-                in_features=self.backbone_dim,
+                in_features=self.feature_dim,
                 out_features=representation_dim,
             )
         elif head == 'mlp':
             self.contrastive_head = nn.Sequential(
                 nn.Linear(
-                    in_features=self.backbone_dim,
-                    out_features=self.backbone_dim,
+                    in_features=self.feature_dim,
+                    out_features=self.feature_dim,
                 ),
                 nn.ReLU(),
                 nn.Linear(
-                    in_features=self.backbone_dim,
+                    in_features=self.feature_dim,
                     out_features=representation_dim,
                 )
             )
@@ -104,8 +104,7 @@ class ClassificationModel(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        mid_channels: int,
-        dataset: str,
+        mid_channels: int = 4,
         num_classes: int = 10,
     ) -> None:
         super().__init__()
@@ -113,17 +112,15 @@ class ClassificationModel(nn.Module):
             in_channels=in_channels,
             mid_channels=mid_channels,
         )
-        self.dataset = dataset
-        self._initiate_resnet()
-        self.backbone_dim = 2 * mid_channels
+        self.feature_dim = 2 * mid_channels
 
         self.classification_head = nn.Linear(
-            in_features=self.backbone_dim,
+            in_features=self.feature_dim,
             out_features=num_classes,
             )
-
+        
         self._init_weights()
-    
+
     def forward(
         self,
         x: Tensor,
@@ -151,12 +148,6 @@ class ClassificationModel(nn.Module):
             raise ValueError(f'Invalid forward pass type {forward_pass}')
         
         return out
-
-    def _initiate_resnet(self) -> None:
-        resnet_path = os.path.join(RESNET_PATH, self.dataset, 'epoch_30.pt')
-        ckpt = torch.load(resnet_path)
-        self.resnet.load_state_dict(ckpt['model'])
-        return None
     
     def _init_weights(self) -> None:
         for param in self.parameters():
