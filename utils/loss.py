@@ -311,6 +311,7 @@ class classificationloss(nn.Module):
         entropy_weight: float = 5.0,
         inconsistency_weight: float = 1.0,
     ) -> None:
+        super().__init__()
         self.softmax = nn.Softmax(dim=1)
         self.bceloss = nn.BCELoss()
         self.entropy_weight = entropy_weight
@@ -318,14 +319,14 @@ class classificationloss(nn.Module):
 
     def forward(
         self,
-        anchors: Tensor,
-        nearest_neighbors: Tensor,
-        furthest_neighbors: Tensor,
-    ) -> Tensor:
-        B, N = anchors.shape
-        anchors_probability = self.softmax(anchors)
-        positives_pobability = self.softmax(nearest_neighbors)
-        negative_probability = self.softmax(furthest_neighbors)
+        anchor: Tensor,
+        nearest_neighbor: Tensor,
+        furthest_neighbor: Tensor,
+    ) -> Tuple[Tensor, float, float, float]:
+        B, N = anchor.shape
+        anchors_probability = self.softmax(anchor)
+        positives_pobability = self.softmax(nearest_neighbor)
+        negative_probability = self.softmax(furthest_neighbor)
 
         consistency_similarity = torch.bmm(
             anchors_probability.view(B, 1, N),
@@ -356,7 +357,10 @@ class classificationloss(nn.Module):
                     - self.inconsistency_weight * inconsistency_loss \
                     - self.entropy_weight * entropy_loss
         
-        return total_loss, consistency_loss, inconsistency_loss, entropy_loss
+        return total_loss, \
+        consistency_loss.item(), \
+        inconsistency_loss.item(),\
+        entropy_loss.item()
     
     def entropy(
         self,
@@ -374,4 +378,5 @@ class classificationloss(nn.Module):
         elif len(b.size()) == 1:
             return -b.sum()
         else:
-            raise ValueError(f'Input tensor is {b.size()}-dimensional.')
+            raise ValueError(
+                f'Expected input size to be 1 or 2, but got {b.size()}')
