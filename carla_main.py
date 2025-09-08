@@ -22,7 +22,7 @@ def str2bool(v: str) -> bool:
     return v.lower() in 'true'
 
 
-def cosine_scheduler(
+def cosine_schedule(
     optimizer: optim.Adam,
     current_epoch: int,
     total_epochs: int = 30,
@@ -129,7 +129,7 @@ def pretext(
     for epoch in range(epochs):
         print(f'Epoch {epoch + 1} start.')
 
-        cosine_scheduler(optimizer=optimizer, current_epoch=epoch)
+        cosine_schedule(optimizer=optimizer, current_epoch=epoch)
         epoch_loss = 0.0
         prev_loss = None
 
