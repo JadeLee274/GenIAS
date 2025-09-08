@@ -308,7 +308,7 @@ class classificationloss(nn.Module):
     """
     def __init__(
         self,
-        entropy_weight: float = 2.0,
+        entropy_weight: float = 5.0,
         inconsistency_weight: float = 1.0,
     ) -> None:
         self.softmax = nn.Softmax(dim=1)
@@ -327,21 +327,21 @@ class classificationloss(nn.Module):
         positives_pobability = self.softmax(nearest_neighbors)
         negative_probability = self.softmax(furthest_neighbors)
 
-        similarity = torch.bmm(
+        consistency_similarity = torch.bmm(
             anchors_probability.view(B, 1, N),
             positives_pobability.view(B, N, 1),
-        ).squeeze() # (B, 1)
-        positive_pseudolabel = torch.ones_like(similarity) # (B, 1)
+        ).squeeze() # (B,)
+        positive_pseudolabel = torch.ones_like(consistency_similarity) # (B,)
         consistency_loss = self.bceloss(
-            similarity,
+            consistency_similarity,
             positive_pseudolabel
         )
 
         negative_similarity = torch.bmm(
             anchors_probability.view(B, 1, N),
             negative_probability.view(B, N, 1),
-        ).squeeze()
-        negative_pseudolabel = torch.zeros_like(negative_similarity) # (B, 1)
+        ).squeeze() # (B,)
+        negative_pseudolabel = torch.zeros_like(negative_similarity) # (B,)
         inconsistency_loss = self.bceloss(
             negative_similarity,
             negative_pseudolabel
@@ -353,15 +353,15 @@ class classificationloss(nn.Module):
         )
 
         total_loss = consistency_loss \
-                    - self.entropy_weight * entropy_loss \
-                    - self.inconsistency_weight * inconsistency_loss
+                    - self.inconsistency_weight * inconsistency_loss \
+                    - self.entropy_weight * entropy_loss
         
         return total_loss, consistency_loss, inconsistency_loss, entropy_loss
     
     def entropy(
         self,
         x: Tensor,
-        input_as_probability: bool,
+        input_as_probability: bool = True,
     ) -> Tensor:
         if input_as_probability:
             x_ = torch.clamp(x, min=1e-8)
