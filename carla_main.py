@@ -6,7 +6,7 @@ from utils.common_import import *
 from data_factory.loader import PretextDataset
 from torch.utils.data import DataLoader
 import torch.optim as optim
-from carla.model import ContrastiveModel
+from carla.model import PretextModel, ClassificationModel
 from utils.loss import pretextloss, classificationloss
 
 
@@ -89,7 +89,7 @@ def pretext(
         use_genias=use_genias,
     )
     
-    model = ContrastiveModel(
+    model = PretextModel(
         in_channels=train_dataset.data_dim,
         mid_channels=4,
     )
@@ -168,18 +168,6 @@ def pretext(
     
     if not os.path.exists(classification_data_dir):
         os.makedirs(classification_data_dir, exist_ok=True) 
-
-    print(f'\nSaving anchor dataset for classification task...')
-    np.save(
-        file=os.path.join(classification_data_dir, 'anchor.npy'),
-        arr=train_dataset.windows,
-    )
-
-    print(f'Saving negative pair dataset for classification task...')
-    np.save(
-        file=os.path.join(classification_data_dir, 'negative_pair.npy'),
-        arr=train_dataset.negative_pairs,
-    )
        
     resnet = model.resnet
     resnet.eval()
@@ -214,7 +202,7 @@ def pretext(
     nearest_neighbors = []
     furthest_neighbors = []
 
-    feature_dim = model.backbone_dim
+    feature_dim = model.feature_dim
     index_searcher = IndexFlatL2(feature_dim)
     index_searcher.add(features)
 
@@ -289,7 +277,23 @@ def classification(
     than the probabilities such that the data is sent to another class; 
     abnormal otherwise.
     """
+    classification_data_dir = f'classification_dataset/{dataset}'
 
+    anchors = np.load(
+        os.path.join(classification_data_dir, 'anchors.npy')
+    )
+    negative_pairs = np.load(
+        os.path.join(classification_data_dir, 'negative_pairs.npy')
+    )
+    nearest_neighbors = np.load(
+        os.path.join(classification_data_dir, 'nearest_neighbors.npy')
+    )
+    furthest_neighbors = np.load(
+        os.path.join(classification_data_dir, 'furthest_neighbors.npy')
+    )
+
+    data_dim = anchors.shape[-1]
+    data_len = anchors.shape[0]
     return 
 
 
