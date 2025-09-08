@@ -1,3 +1,7 @@
+# Ignora particular file.
+debug.py
+
+# Ignore all extensions.
 *.csv
 *.ipynb
 *.log
@@ -6,8 +10,8 @@
 *.pth
 *.xlsx
 
-debug.py
 
+# Ignore directory
 data/
 log/
 practice/
