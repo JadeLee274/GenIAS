@@ -10,7 +10,6 @@ debug.py
 *.pth
 *.xlsx
 
-
 # Ignore directory
 data/
 log/
