@@ -16,7 +16,8 @@ CARLA: Self-Supervised Contrastive Representation Learning for Time Series
        Anomaly Detection,
 Darban et al., 2024
        
-Paper link: https://arxiv.org/pdf/2502.08262
+GenIAS link: https://arxiv.org/pdf/2502.08262
+CARLA link: https://www.sciencedirect.com/science/article/pii/S0031320324006253
 """
 
 ############################# Dataset for GenIAS #############################
