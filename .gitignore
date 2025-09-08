@@ -8,11 +8,9 @@
 
 debug.py
 
-checkpoints/
 data/
 log/
 practice/
-clasification_dataset/
 __pycache__/
 save/
 temp/
