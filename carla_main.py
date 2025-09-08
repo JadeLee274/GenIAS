@@ -210,7 +210,7 @@ def pretext(
     index_searcher.add(features)
 
     anchor_and_negative_pairs = np.concatenate(
-        [train_dataset.windows, train_dataset.negative_pairs],
+        [train_dataset.anchors, train_dataset.negative_pairs],
         axis=0,
     )
 
