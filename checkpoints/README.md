@@ -2,6 +2,6 @@
 
 The directory that the model will be saved.
 
-It consists of directories like MSL, SMD, SWaT, etc., in order to save data with respect to benchmark dataset.
+It consists of carla_classification, carla_pretext, vae, svdd directories. The former two are for CARLA, and the rest are for GenIAS.
 
-For details, see genias_main.py and carla_main.py.
+For details, see carla_main.py and genias_main.py.
