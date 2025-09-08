@@ -7,10 +7,15 @@ DATA_PATH = '/data/seungmin'
 VAE_PATH = '../checkpoints/vae'
 RESNET_PATH = '../checkpoints/carla_pretext'
 """
-Codes for loading data. This code follows the paper
+Codes for loading data. These codes follows the papers
+
 GenIAS: Generator for Instantiating Anomalies in Time Series,
 Darban et al., 2025
 
+CARLA: Self-Supervised Contrastive Representation Learning for Time Series
+       Anomaly Detection,
+Darban et al., 2024
+       
 Paper link: https://arxiv.org/pdf/2502.08262
 """
 
