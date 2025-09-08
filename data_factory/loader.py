@@ -3,7 +3,6 @@ from torch.utils.data import Dataset
 from genias.tcnvae import VAE
 from utils.common_import import *
 from utils.preprocess import *
-from carla.model import ContrastiveModel
 DATA_PATH = '/data/seungmin'
 VAE_PATH = '../checkpoints/vae'
 RESNET_PATH = '../checkpoints/carla_pretext'
@@ -15,6 +14,7 @@ Darban et al., 2025
 Paper link: https://arxiv.org/pdf/2502.08262
 """
 
+############################# Dataset for GenIAS #############################
 
 class GenIASDataset(object):
     """
@@ -155,6 +155,7 @@ class GenIASDataset(object):
             
             return window, label
 
+############################## Dataset for CARLA ##############################
 
 class PretextDataset(object):
     """
@@ -226,21 +227,13 @@ class PretextDataset(object):
                 data = data[:, :-1]
                 labels = np.where(labels == 'Normal', 0, 1)
         
-        
-        patch_coef = 0.3
-
-        if dataset == 'MSL':
-            patch_coef = 0.4
-        elif dataset in ['SMAP', 'Yahoo']:
-            patch_coef = 0.2
-
         self.data = data
         mean, std = get_mean_std(data)
         self.mean = mean
         self.std = std
 
-        self.windows = convert_to_windows(data=data, window_size=window_size)
-        self.data_dim = self.windows.shape[-1]
+        self.anchors = convert_to_windows(data=data, window_size=window_size)
+        self.data_dim = self.anchors.shape[-1]
 
         if labels:
             self.labels = convert_to_windows(
@@ -248,20 +241,25 @@ class PretextDataset(object):
                 window_size=window_size
             )
         
+        patch_coef = 0.3
+
+        if dataset == 'MSL':
+            patch_coef = 0.4
+        elif dataset in ['SMAP', 'Yahoo']:
+            patch_coef = 0.2
+        
         self.get_positive_pairs()
         self.get_negative_pairs(patch_coef=patch_coef)
-
-        
    
     def get_positive_pairs(self) -> None:
         positive_pairs = []
 
-        for idx in range(self.windows.shape[0]):
+        for idx in range(self.anchors.shape[0]):
             if idx > 10:
                 positive_pair_idx = np.random.randint(idx - 10, idx)
-                positive_pair = self.windows[positive_pair_idx]
+                positive_pair = self.anchors[positive_pair_idx]
             else:
-                positive_pair = self.windows[idx]
+                positive_pair = self.anchors[idx]
                 positive_pair = noise_transformation(x=positive_pair)
             
             positive_pairs.append(positive_pair)
@@ -324,8 +322,8 @@ class PretextDataset(object):
         else:
             negative_pairs = []
             
-            for idx in range(self.windows.shape[0]):
-                window = self.windows[idx]
+            for idx in range(self.anchors.shape[0]):
+                window = self.anchors[idx]
                 negative_pairs.append(
                     self.anomaly_injection(window)
                 )
@@ -335,16 +333,22 @@ class PretextDataset(object):
         return
 
     def __len__(self) -> int:
-        return self.windows.shape[0]
+        return self.anchors.shape[0]
     
-    def __getitem__(self, idx: int) -> Tuple[Matrix, Matrix, Matrix, Matrix]:
+    def __getitem__(
+        self,
+        idx: int
+    ) -> Union[
+        Tuple[Matrix, Matrix, Matrix],
+        Tuple[Matrix, Matrix, Matrix, Matrix],
+    ]:
         mean = self.mean
         std = self.std
         std = np.where(std==0.0, 1.0, std)
 
         if self.mode == 'train':
-            window = self.windows[idx]
-            window = (window - mean) / std
+            anchor = self.anchors[idx]
+            anchor = (anchor - mean) / std
 
             positive_pair = self.positive_pairs[idx]
             positive_pair = (positive_pair - mean) / std
@@ -352,11 +356,11 @@ class PretextDataset(object):
             negative_pair = self.negative_pairs[idx]
             negative_pair = (negative_pair - mean) / std
 
-            return window, positive_pair, negative_pair
+            return anchor, positive_pair, negative_pair
         
         elif self.mode == 'test':
-            window = self.windows[idx]
-            window = (window - mean) / std
+            anchor = self.anchors[idx]
+            anchor = (anchor - mean) / std
 
             positive_pair = self.positive_pairs[idx]
             positive_pair = (positive_pair - mean) / std
@@ -366,4 +370,114 @@ class PretextDataset(object):
 
             label = self.labels[idx]
 
-            return window, positive_pair, negative_pair, label        
+            return anchor, positive_pair, negative_pair, label        
+
+
+class ClassificationDataset(object):
+    def __init__(
+        self,
+        dataset: str,
+        window_size: int = 200,
+        mode: str = 'train',
+    ) -> None:
+        assert mode in ['train', 'test'], \
+        "mode must be either 'train' or 'test'"
+
+        data = None
+        labels = None
+        
+        if dataset in ['MSL', 'SMAP', 'SMD']:
+            if mode == 'train':
+                data = np.load(
+                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy'))
+            elif mode == 'test':
+                data = np.load(
+                    os.path.join(DATA_PATH, dataset, f'{dataset}_test.npy')
+                )
+                labels = np.load(
+                    os.path.join(
+                        DATA_PATH, dataset, f'{dataset}_test_label.npy'
+                    )
+                )
+                anomalies = data[labels == 1]
+        
+        elif dataset == 'SWaT':
+            if mode == 'train':
+                data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
+                data.drop(
+                    columns=[' Timestamp', 'Normal/Attack'],
+                    inplace=True,
+                )
+                data = data.values[:, 1:]
+            elif mode == 'test':
+                data = pd.read_csv(
+                    os.path.join(DATA_PATH, 'SWaT', 'SWaT_Abormal.csv')
+                )
+                data.drop(columns=[' Timestamp'], inplace=True)
+                data = data.values
+                labels = data[:, -1]
+                anomalies = data[labels == 1]
+                anomalies = anomalies[:, :-1]
+                data = data[:, :-1]
+                labels = np.where(labels == 'Normal', 0, 1)
+
+        self.data_dim = data.shape[-1]
+        mean, std = get_mean_std(data)
+        std = np.where(std==0.0, 1.0, std)
+        self.mean = mean
+        self.std = std
+
+        self.anchors = convert_to_windows(data=data, window_size=window_size)
+        
+        neighbors_dir = f'classification_dataset/{dataset}'
+
+        self.nearest_neighbors = np.load(
+            os.path.join(neighbors_dir, 'nearest_neighbors.npy')
+        )
+        self.furthest_neighbors = np.load(
+            os.path.join(neighbors_dir, 'furthest_neighbors.npy')
+        )
+
+        if labels:
+            self.labels = convert_to_windows(
+                data=labels,
+                window_size=window_size
+            )
+
+        self.mode = mode
+
+        return
+
+    def __len__(self) -> int:
+        return self.anchors.shape[0]
+    
+    def __getitem__(
+        self,
+        idx: int
+    ) -> Union[
+        Tuple[NPTensor, NPTensor, NPTensor],
+        Tuple[NPTensor, NPTensor, NPTensor, NPTensor],
+    ]:
+        if self.mode == 'train':
+            anchor = self.anchors[idx]
+            nearest_neighbor = self.nearest_neighbors[idx]
+            furthest_neighbor = self.furthest_neighbors[idx]
+
+            anchor = (anchor - self.mean) / self.std
+            nearest_neighbor = (nearest_neighbor - self.mean) / self.std
+            furthest_neighbor = (furthest_neighbor - self.mean) / self.std
+
+            return anchor, nearest_neighbor, furthest_neighbor
+        
+        elif self.mode == 'test':
+            anchor = self.anchors[idx]
+            nearest_neighbor = self.nearest_neighbors[idx]
+            furthest_neighbor = self.furthest_neighbors[idx]
+
+            anchor = (anchor - self.mean) / self.std
+            nearest_neighbor = (nearest_neighbor - self.mean) / self.std
+            furthest_neighbor = (furthest_neighbor - self.mean) / self.std
+
+            label = self.labels[idx]
+
+            return anchor, nearest_neighbor, furthest_neighbor, label
