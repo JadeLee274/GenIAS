@@ -362,7 +362,7 @@ def classification(
         print(f'- Consistency loss: {consistency_loss:.4e}')
         print(f'- Inconsistency loss: {inconsistency_loss:.4e}')
         print(f'- Entropy loss: {entropy_loss:.4e}')
-        print(f'- Total loss: {epoch_loss:.4e}')
+        print(f'- Total loss: {epoch_loss:.4e}\n')
 
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
