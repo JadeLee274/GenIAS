@@ -429,7 +429,7 @@ class ClassificationDataset(object):
 
         self.anchors = convert_to_windows(data=data, window_size=window_size)
         
-        neighbors_dir = f'classification_dataset/{dataset}'
+        neighbors_dir = f'../classification_dataset/{dataset}'
 
         self.nearest_neighbors = np.load(
             os.path.join(neighbors_dir, 'nearest_neighbors.npy')
