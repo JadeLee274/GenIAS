@@ -3,7 +3,7 @@ from math import cos, pi
 from tqdm import tqdm
 from faiss import IndexFlatL2
 from utils.common_import import *
-from data_factory.loader import PretextDataset
+from data_factory.loader import PretextDataset, ClassificationDataset
 from torch.utils.data import DataLoader
 import torch.optim as optim
 from carla.model import PretextModel, ClassificationModel
@@ -50,7 +50,7 @@ def pretext(
     batch_size: int = 50,
     gpu_num: int = 0,
     learning_rate: float = 1e-3,
-    resnet_save_interval: int = 5,
+    model_save_interval: int = 5,
     use_genias: bool = False,
     num_neighbors: int = 5,
 ) -> None:
@@ -58,19 +58,19 @@ def pretext(
     Training code for CARLA pretext stage.
 
     Parameters:
-        dataset:              Name of the training dataset.
-        window_size:          Window size. Default 200.
-        batch_size:           Batch size. Default 50.
-        gpu_num:              The model is trained in this GPU. Default 0.
-        epochs:               Training epoch: Default 30.
-        learning_rate:        Initial learning rate. Default 1e-3.
-        resnet_save_interval: The ResNet is saved once in this epoch. 
-                              Default 5.
-        use_genias:           Whether or not to use GenIAS for creating 
-                              negative pair. Default True.
-        num_neighbors:        Choose this number of nearese/furthers 
-                              neighborhood after the training loop.
-                              Default 5.
+        dataset:             Name of the training dataset.
+        window_size:         Window size. Default 200.
+        batch_size:          Batch size. Default 50.
+        gpu_num:             The model is trained in this GPU. Default 0.
+        epochs:              Training epoch: Default 30.
+        learning_rate:       Initial learning rate. Default 1e-3.
+        model_save_interval: The ResNet is saved once in this epoch. 
+                             Default 5.
+        use_genias:          Whether or not to use GenIAS for creating 
+                             negative pair. Default True.
+        num_neighbors:       Choose this number of nearese/furthers 
+                             neighborhood after the training loop.
+                             Default 5.
 
     Uses Resnet model and mlp head to map anchor, positive pair, and negative
     pair to the representation space (with dimension 128, in this case).
@@ -79,8 +79,8 @@ def pretext(
     the anchor and the positive pair get smaller, while that of
     the anchor and the negative pair get larger, in the representation space.
 
-    The ResNet part is saved once in a resnet_save_interval epochs, in order to
-    be used for the self-supervised stage of CARLA.
+    The model is saved once in a model_save_interval epochs, in order to be
+    used for the self-supervised stage of CARLA.
     """
     train_dataset = PretextDataset(
         dataset=dataset,
@@ -116,18 +116,18 @@ def pretext(
     )
 
     model.train()
-    print('Training loop start...')
+    print('Pretext training loop start...\n')
 
     for epoch in range(epochs):
-        print(f'Epoch {epoch + 1} start')
+        print(f'Epoch {epoch + 1} start.')
 
         cosine_scheduler(optimizer=optimizer, current_epoch=epoch)
         epoch_loss = 0.0
         prev_loss = None
 
-        for data in tqdm(train_loader):
+        for batch in tqdm(train_loader):
             optimizer.zero_grad()
-            anchor, positive_pair, negative_pair = data
+            anchor, positive_pair, negative_pair = batch
             B, W, F = anchor.shape
             anchor = anchor.to(device)
             positive_pair = positive_pair.to(device)
@@ -152,7 +152,7 @@ def pretext(
         epoch_loss /= len(train_loader)
         print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
 
-        if epoch == 0 or (epoch + 1) % resnet_save_interval == 0:
+        if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
                 obj={
                     'resnet': model.resnet.state_dict(),
@@ -162,7 +162,7 @@ def pretext(
                 f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
             )
 
-    print('Done.\n')
+    print('Pretext training done.\n')
       
     resnet = model.resnet
     resnet.eval()
@@ -238,7 +238,7 @@ def pretext(
         arr=furthest_neighbors,
     )
 
-    print('\nSelecting process done. Move on to the classification stage.')
+    print('\nPretext stage done. Move on to the classification stage.')
     
     return
 
@@ -247,10 +247,9 @@ def classification(
     dataset: str,
     window_size: int = 200,
     batch_size: int = 100,
-    num_neighbors: int = 10,
     gpu_num: int = 0,
     epochs: int = 100,
-    learning_rate: float = 1e-4,
+    learning_rate: float = 1e-2,
     model_save_interval: int = 5,
 ) -> None:
     """
@@ -277,25 +276,81 @@ def classification(
     than the probabilities such that the data is sent to another class; 
     abnormal otherwise.
     """
-    classification_data_dir = f'classification_dataset/{dataset}'
+    device = torch.device(f'cuda:{gpu_num}')
+    
+    train_dataset = ClassificationDataset(
+        dataset=dataset,
+        window_size=window_size,
+        mode='train'
+    )
+    data_dim = train_dataset.data_dim
 
-    anchors = np.load(
-        os.path.join(classification_data_dir, 'anchors.npy')
-    )
-    negative_pairs = np.load(
-        os.path.join(classification_data_dir, 'negative_pairs.npy')
-    )
-    nearest_neighbors = np.load(
-        os.path.join(classification_data_dir, 'nearest_neighbors.npy')
-    )
-    furthest_neighbors = np.load(
-        os.path.join(classification_data_dir, 'furthest_neighbors.npy')
-    )
+    resnet_dir = os.path.join('checkpoints/carla_pretext', dataset)
+    resnet_ckpt = torch.load(os.path.join(resnet_dir, 'epoch_30.pt'))
+    model = ClassificationModel(in_channels=data_dim)
+    model.resnet.load_state_dict(resnet_ckpt['resnet'])
+    model = model.to(device)
 
-    data_dim = anchors.shape[-1]
-    data_len = anchors.shape[0]
+    ckpt_dir = os.path.join(f'checkpoints/carla_classification/{dataset}')
+    
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+    )
+    optimizer = optim.Adam(
+        params=model.parameters(),
+        lr=learning_rate,
+    )
+    criterion = classificationloss()
+    criterion = criterion.to(device)
+
+    print('Classification training loop start...\n')
+
+    for epoch in range(epochs):
+        print(f'Epoch {epoch + 1} start.')
+        epoch_loss = 0.0
+
+        for batch in tqdm(train_loader):
+            optimizer.zero_grad()
+            anchor, nearest_neighbors, furthest_neighbors = batch
+            anchor = anchor.to(device)
+            anchor = model.forward(anchor)
+
+            nearest_neighbors = nearest_neighbors.to(device)
+            furthest_neighbors = furthest_neighbors.to(device)
+            loss = torch.zeros(1, device=device)
+
+            for i in range(nearest_neighbors.shape[1]):
+                nearest = nearest_neighbors[:, i].transpose(-2, -1)
+                furthest = furthest_neighbors[:, i].transpose(-2, -1)
+
+                nearest = model.forward(nearest)
+                furthest = model.forward(furthest)
+
+                sub_loss = criterion.forward(anchor, nearest, furthest)[0]
+                loss += sub_loss
+
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        
+        epoch_loss /= len(train_loader)
+        
+        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+
+        if epoch == 0 or (epoch + 1) % model_save_interval == 0:
+            torch.save(
+                obj={
+                    'model': model.state_dict(),
+                    'optim': optimizer.state_dict(),
+                },
+                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt'),
+            )
+    
+    print('Classification training done.')
+
     return 
-
 
 
 if __name__ == '__main__':
@@ -342,22 +397,34 @@ if __name__ == '__main__':
         help="Training epochs for pretext stage. Default 30."
     )
     args.add_argument(
+        '--classification-epochs',
+        type=int,
+        default=100,
+        help="Training epochs for classification stage. Default 100."
+    )
+    args.add_argument(
         '--classifiation-epochs',
         type=int,
         default=100,
         help="Training epochs for classification stage. Default 100."
     )
     args.add_argument(
-        '--learning-rate',
+        '--pretext-learning-rate',
         type=float,
-        default=1e-4,
-        help="Initial learning rate. Default 1e-4."
+        default=1e-3,
+        help="Initial learning rate. Default 1e-3."
     )
     args.add_argument(
-        '--resnet-save-interval',
+        '--classification-learning-rate',
+        type=float,
+        default=1e-2,
+        help="Initial learning rate. Default 1e-2."
+    )
+    args.add_argument(
+        '--model-save-interval',
         type=int,
         default=5,
-        help='The resnet in pretext stage will be saved once in this epochs.'
+        help='The model will be saved once in this epochs.'
     )
     config = args.parse_args()
 
@@ -371,8 +438,8 @@ if __name__ == '__main__':
             batch_size=config.batch_size,
             gpu_num=config.gpu_num,
             epochs=config.pretext_epochs,
-            learning_rate=config.learning_rate,
-            resnet_save_interval=config.resnet_save_interval,
+            learning_rate=config.pretext_learning_rate,
+            model_save_interval=config.model_save_interval,
             use_genias=config.use_genias,
         )
 
@@ -383,7 +450,7 @@ if __name__ == '__main__':
             batch_size=config.batch_size,
             gpu_num=config.gpu_num,
             epochs=config.classification_epochs,
-            learning_rate=config.learning_rate,
-            resnet_save_interval=config.resnet_save_interval,
+            learning_rate=config.classification_learning_rate,
+            model_save_interval=config.model_save_interval,
         )
     
