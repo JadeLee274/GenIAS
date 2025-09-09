@@ -2,6 +2,9 @@ import argparse
 from math import cos, pi
 from tqdm import tqdm
 from faiss import IndexFlatL2
+from torch.nn import Softmax
+from sklearn.metrics import f1_score, roc_auc_score, \
+                            precision_recall_curve, auc
 from utils.common_import import *
 from data_factory.loader import PretextDataset, ClassificationDataset
 from torch.utils.data import DataLoader
@@ -375,6 +378,72 @@ def classification(
             )
     
     print('Classification training done.')
+
+    print('\nStarting inference...')
+
+    softmax = Softmax(dim=1)
+
+    test_dataset = ClassificationDataset(dataset='MSL', mode='test')
+    test_data = torch.tensor(
+        data=test_dataset.unprocessed_data,
+        dtype=torch.float32
+    )
+    test_data = test_data.unsqueeze(1).transpose(-2, -1).to(device)
+    labels = test_dataset.unprocessed_labels.reshape(-1)
+
+    model.eval()
+
+    logits = model(test_data)
+    logits = softmax(logits)
+    logits = logits.detach().cpu().numpy()
+
+    classes = [0 for _ in range(10)]
+
+    for i in range(len(logits)):
+        logit = logits[i]
+        max_index = np.argmax(logit)
+        classes[max_index] += 1
+
+    major_class = classes.index(max(classes))
+
+    anomaly_labels = []
+    anomaly_scores = []
+
+    for i in range(len(logits)):
+        logit = logits[i]
+        major_probability = logit[major_class]
+        
+        if np.argmax(logit) == major_class:
+            anomaly_labels.append(1)
+        else:
+            anomaly_labels.append(0)
+        
+        anomaly_scores.append(1 - major_probability)
+
+    anomaly_labels = np.array(anomaly_labels)
+    anomaly_scores = np.array(anomaly_scores)
+
+    f1 = f1_score(
+        y_true=labels,
+        y_pred=anomaly_labels,
+    )
+
+    auc_roc = roc_auc_score(
+        y_true=labels,
+        y_score=anomaly_scores,
+    )
+
+    precision, recall, _ = precision_recall_curve(
+        y_true=labels,
+        probas_pred=anomaly_scores,
+    )
+
+    auc_pr = auc(recall, precision)
+
+    print('\nResults')
+    print(f'- F1 Score: {round(f1, 4)}')
+    print(f'- AUC-ROC: {round(auc_roc, 4)}')
+    print(f'- AUC-PR: {round(auc_pr, 4)}')
 
     return 
 
