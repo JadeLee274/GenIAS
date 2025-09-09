@@ -347,10 +347,10 @@ def entropy(
     entropy_weight: float = 5.0,
 ) -> Tensor:
     if input_as_probability:
-        anchor_ = torch.clamp(anchor, min=1e-8)
-        b = anchor_ * torch.log(anchor_)
+        x_ = torch.clamp(x, min=1e-8)
+        b = x_ * torch.log(x_)
     else:
-        b = F.softmax(anchor, dim=1) * F.log_softmax(anchor, dim=1)
+        b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
     
     if len(b.size()) == 2:
         return -b.sum(dim=1).mean() * entropy_weight
