@@ -187,6 +187,8 @@ class PretextDataset(object):
         mode: str = 'train',
         use_genias: bool = False,
     ) -> None:
+        print(f'Loading {dataset} dataset...\n')
+        
         assert mode in ['train', 'test'], \
         "mode must be either 'train' or 'test'"
 
@@ -255,8 +257,21 @@ class PretextDataset(object):
         elif dataset in ['SMAP', 'Yahoo']:
             patch_coef = 0.2
         
+        print('Getting positive pairs...')
         self.get_positive_pairs()
+
+        print('Getting negative pairs...')
         self.get_negative_pairs(patch_coef=patch_coef)
+
+        print('Saving negative pairs for classification stage...')
+
+        classification_data_dir = f'classification_dataset/{dataset}'
+        np.save(
+            file=os.path.join(classification_data_dir, 'negative_pairs.npy'),
+            arr=self.negative_pairs,
+        )
+
+        print('Dataset loaded.\n')
    
     def get_positive_pairs(self) -> None:
         positive_pairs = []
