@@ -238,7 +238,7 @@ def pretext(
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
         file=os.path.join(
-            classification_data_dir, 'anchor_nearest_neighbors.npy'
+            classification_data_dir, 'anchor_nns.npy'
         ),
         arr=nearest_neighbors,
     )
@@ -247,7 +247,7 @@ def pretext(
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
         file=os.path.join(
-            classification_data_dir, 'anchor_furthest_neighbors.npy'
+            classification_data_dir, 'anchor_fns.npy'
         ),
         arr=furthest_neighbors,
     )
@@ -274,7 +274,7 @@ def pretext(
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
         file=os.path.join(
-            classification_data_dir, 'negative_pair_nearest_neighbors.npy'
+            classification_data_dir, 'negative_nns.npy'
         ),
         arr=nearest_neighbors,
     )
@@ -283,7 +283,7 @@ def pretext(
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
         file=os.path.join(
-            classification_data_dir, 'negative_pair_furthest_neighbors.npy'
+            classification_data_dir, 'negative_fns.npy'
         ),
         arr=furthest_neighbors,
     )
