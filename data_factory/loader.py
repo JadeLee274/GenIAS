@@ -454,16 +454,16 @@ class ClassificationDataset(object):
         classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
 
         print('Loadinig nearest neighborhoods of anchor...')
-        self.anchor_nearest_neighbors = np.load(
+        self.anchor_nns = np.load(
             os.path.join(
-                classification_data_dir, 'anchor_nearest_neighbors.npy'
+                classification_data_dir, 'anchor_nns.npy'
             )
         )
 
         print('Loadinig furthest neighborhoods of anchor...')
-        self.anchor_furthest_neighbors = np.load(
+        self.anchor_fns = np.load(
             os.path.join(
-                classification_data_dir, 'anchor_furthest_neighbors.npy'
+                classification_data_dir, 'anchor_fns.npy'
             )
         )
 
@@ -473,16 +473,16 @@ class ClassificationDataset(object):
         )
 
         print('Loadinig nearest neighborhoods of negative pairs...')
-        self.negative_pairs_nearest_neighbors = np.load(
+        self.negative_nns = np.load(
             os.path.join(
-                classification_data_dir, 'negative_pair_nearest_neighbors.npy'
+                classification_data_dir, 'negative_nns.npy'
             )
         )
 
         print('Loadinig furthest neighborhoods of negative pairs...')
-        self.negative_pairs_furthest_neighbors = np.load(
+        self.negative_fns = np.load(
             os.path.join(
-                classification_data_dir, 'negative_pair_furthest_neighbors.npy'
+                classification_data_dir, 'negative_fns.npy'
             )
         )
 
@@ -515,16 +515,16 @@ class ClassificationDataset(object):
 
         if self.mode == 'train':
             anchor = self.anchors[idx]
-            anchor_nn = self.anchor_nearest_neighbors[idx]
-            anchor_fn = self.anchor_furthest_neighbors[idx]
+            anchor_nn = self.anchor_nns[idx]
+            anchor_fn = self.anchor_fns[idx]
 
             anchor = self._normalize(anchor, mean, std)
             anchor_nn = self._normalize(anchor_nn, mean, std)
             anchor_fn = self._normalize(anchor_fn, mean, std)
 
             negative = self.negative_pairs[idx]
-            negative_nn = self.negative_pairs_nearest_neighbors[idx]
-            negative_fn = self.negative_pairs_furthest_neighbors[idx]
+            negative_nn = self.negative_nns[idx]
+            negative_fn = self.negative_fns[idx]
 
             negative = self._normalize(negative, mean, std)
             negative_nn = self._normalize(negative_nn, mean, std)
@@ -535,16 +535,16 @@ class ClassificationDataset(object):
         
         elif self.mode == 'test':
             anchor = self.anchors[idx]
-            anchor_nn = self.anchor_nearest_neighbors[idx]
-            anchor_fn = self.anchor_furthest_neighbors[idx]
+            anchor_nn = self.anchor_nns[idx]
+            anchor_fn = self.anchor_fns[idx]
 
             anchor = self._normalize(anchor, mean, std)
             anchor_nn = self._normalize(anchor_nn, mean, std)
             anchor_fn = self._normalize(anchor_fn, mean, std)
 
             negative = self.negative_pairs[idx]
-            negative_nn = self.negative_pairs_nearest_neighbors[idx]
-            negative_fn = self.negative_pairs_furthest_neighbors[idx]
+            negative_nn = self.negative_nns[idx]
+            negative_fn = self.negative_fns[idx]
 
             negative = self._normalize(negative, mean, std)
             negative_nn = self._normalize(negative_nn, mean, std)
