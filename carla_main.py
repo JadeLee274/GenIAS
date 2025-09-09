@@ -10,7 +10,7 @@ from data_factory.loader import PretextDataset, ClassificationDataset
 from torch.utils.data import DataLoader
 import torch.optim as optim
 from carla.model import PretextModel, ClassificationModel
-from utils.loss import pretextloss, classificationloss
+from utils.loss import pretextloss, classificationloss, entropy
 
 
 def str2bool(v: str) -> bool:
@@ -353,62 +353,113 @@ def classification(
         lr=learning_rate,
     )
     criterion = classificationloss()
-    criterion = criterion.to(device)
 
     print('Classification training loop start...\n')
 
     for epoch in range(epochs):
         print(f'Epoch {epoch + 1} start.')
         epoch_loss = 0.0
-        epoch_consistency_loss = 0.0
-        epoch_inconsistency_loss = 0.0
+        epoch_anchor_consistency_loss = 0.0
+        epoch_anchor_inconsistency_loss = 0.0
+        epoch_negative_consistency_loss = 0.0
+        epoch_negative_inconsistency_loss = 0.0
         epoch_entropy_loss = 0.0
 
         for batch in tqdm(train_loader):
             optimizer.zero_grad()
-            anchor, nearest_neighbors, furthest_neighbors = batch
+            batch_loss = torch.zeros(1, device=device)
+
+            anchor, anchor_nn, anchor_fn, negative, negative_nn, negative_fn \
+            = batch
+
             anchor = anchor.to(device).float()
+            anchor_nn = anchor_nn.to(device).float()
+            anchor_fn = anchor_fn.to(device).float()
+            negative = negative.to(device).float()
+            negative_nn = negative_nn.to(device).float()
+            negative_fn = negative_fn.to(device).float()
+
             anchor = anchor.transpose(-2, -1)
+            negative = negative.transpose(-2, -1)
             anchor_softmax = model.forward(anchor)
+            negative_softmax = model.forward(negative)
 
-            nearest_neighbors = nearest_neighbors.to(device).float()
-            nearest_neighbors = nearest_neighbors
-            furthest_neighbors = furthest_neighbors.to(device).float()
+            anchor_entropy_loss = entropy(anchor_softmax)
+            negative_entropy_loss = entropy(negative_softmax)
 
-            loss = torch.zeros(1, device=device)
-            consistency_loss = 0.0
-            inconsistency_loss = 0.0
-            entropy_loss = 0.0
+            batch_loss += anchor_entropy_loss
+            batch_loss += negative_entropy_loss
 
-            for i in range(nearest_neighbors.shape[1]):
-                nearest = nearest_neighbors[:, i].transpose(-2, -1)
-                furthest = furthest_neighbors[:, i].transpose(-2, -1)
+            epoch_entropy_loss += anchor_entropy_loss.item()
+            epoch_entropy_loss += negative_entropy_loss.item()
 
-                nearest = model.forward(nearest)
-                furthest = model.forward(furthest)
+            anchor_total_consistency = torch.zeros(1, device=device)
+            negative_total_consistency = torch.zeros(1, device=device)
 
-                sub_loss, sub_consistency, sub_inconsistency, sub_entropy\
-                = criterion.forward(anchor, nearest, furthest)
+            anchor_consistency = 0.0
+            anchor_inconsistency = 0.0
+            negative_consistency = 0.0
+            negative_inconsistency = 0.0
+
+            for i in range(anchor_nn.shape[1]):
+                anchor_nearest = anchor_nn[:, i].transpose(-2, -1)
+                anchor_furthest = anchor_fn[:, i].transpose(-2, -1)
+                negative_nearest = negative_nn[:, i].transpose(-2, -1)
+                negative_furthest = negative_fn[:, i].transpoze(-2, -1)
+
+                anchor_nearest_softmax = model.forward(anchor_nearest)
+                anchor_furthest_softmax = model.forward(anchor_furthest)
+                negative_nearest_softmax = model.forward(negative_nearest)
+                negative_furthest_softmax = model.forward(negative_furthest)
+
+                anchor_total_consist, anchor_consist, anchor_inconsist \
+                = criterion(
+                    anchor_softmax=anchor_softmax,
+                    nearest_softmax=anchor_nearest_softmax,
+                    furthest_softmax=anchor_furthest_softmax,
+                )
+
+                negative_total_consist, negative_consist, negative_inconsist \
+                = criterion(
+                    anchor_softmax=negative_softmax,
+                    nearest_softmax=negative_nearest_softmax,
+                    furthest_softmax=negative_furthest_softmax,
+                )
                 
-                loss += sub_loss
-                consistency_loss += sub_consistency
-                inconsistency_loss += sub_inconsistency
-                entropy_loss += sub_entropy
+                anchor_total_consistency += anchor_total_consist
+                anchor_consistency += anchor_consist
+                anchor_inconsistency += anchor_inconsist
 
-            loss.backward()
+                negative_total_consistency += negative_total_consist
+                negative_consistency += negative_consist
+                negative_inconsistency += negative_inconsist
+            
+            batch_loss += anchor_total_consistency
+            batch_loss += negative_total_consistency
+
+            epoch_anchor_consistency_loss += anchor_consistency
+            epoch_anchor_inconsistency_loss += anchor_inconsistency
+            epoch_negative_consistency_loss += negative_consistency
+            epoch_negative_inconsistency_loss += negative_inconsistency
+
+            batch_loss.backward()
             optimizer.step()
-            epoch_loss += loss.item()
+            epoch_loss += batch_loss.item()
         
         epoch_loss /= len(train_loader)
-        consistency_loss /= len(train_loader)
-        inconsistency_loss /= len(train_loader)
-        entropy_loss /= len(train_loader)
+        epoch_anchor_consistency_loss /= len(train_loader)
+        epoch_anchor_inconsistency_loss /= len(train_loader)
+        epoch_negative_consistency_loss /= len(train_loader)
+        epoch_negative_inconsistency_loss /= len(train_loader)
+        epoch_entropy_loss /= len(train_loader)
         
         print(f'Epoch {epoch + 1} finished.')
-        print(f'- Consistency loss: {consistency_loss:.4e}')
-        print(f'- Inconsistency loss: {inconsistency_loss:.4e}')
-        print(f'- Entropy loss: {entropy_loss:.4e}')
-        print(f'- Total loss: {epoch_loss:.4e}\n')
+        print(f' Anchor Consistency: {epoch_anchor_consistency_loss:.4e}')
+        print(f' Anchor Inconsistency: {epoch_anchor_inconsistency_loss:.4e}')
+        print(f' Negative Consistency: {epoch_negative_consistency_loss:.4e}')
+        print(f' Negative Inonsistency: {epoch_negative_inconsistency_loss:.4e}')
+        print(f' Entropy loss: {epoch_entropy_loss:.4e}')
+        print(f' Total loss: {epoch_loss:.4e}\n')
 
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
