@@ -342,7 +342,7 @@ class classificationloss():
 
 
 def entropy(
-    anchor: Tensor,
+    x: Tensor,
     input_as_probability: bool = True,
     entropy_weight: float = 5.0,
 ) -> Tensor:
