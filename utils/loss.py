@@ -211,7 +211,7 @@ def svdd_loss(
 
 ################################# CARLA loss #################################
 
-class pretextloss(nn.Module):
+class pretextloss():
     """
     Loss function for pretext stage of CARLA.
     
@@ -237,13 +237,12 @@ class pretextloss(nn.Module):
         initial_margin: float = 1.0,
         adjust_factor: float = 0.1,
     ) -> None:
-        super().__init__()
         self.temperature = temperature
         self.batch_size = batch_size
         self.margin = initial_margin
         self.adjust_factor = adjust_factor
 
-    def forward(
+    def __call__(
         self,
         features: Tensor,
         current_loss: Optional[float] = None,
@@ -288,13 +287,12 @@ class pretextloss(nn.Module):
         return loss 
  
 
-class classificationloss(nn.Module):
+class classificationloss():
     """
     Classification loss for CARLA's self-supervised classification stage.
 
     Parameters:
         entropy_weight:       Weight for entropy loss. Default 2.0.
-        inconsistency_weight: Weight for inconsistency loss. Default is 1.0.
 
     Optimizing this loss is for classifying the normal data to particular
     class. It is designed to increase the similarity between the
@@ -309,74 +307,59 @@ class classificationloss(nn.Module):
     def __init__(
         self,
         entropy_weight: float = 5.0,
-        inconsistency_weight: float = 1.0,
     ) -> None:
-        super().__init__()
-        self.softmax = nn.Softmax(dim=1)
         self.bceloss = nn.BCELoss()
         self.entropy_weight = entropy_weight
-        self.inconsistency_weight = inconsistency_weight
 
-    def forward(
+    def __call__(
         self,
-        anchor: Tensor,
-        nearest_neighbor: Tensor,
-        furthest_neighbor: Tensor,
+        anchor_softmax: Tensor,
+        nearest_softmax: Tensor,
+        furthest_softmax: Tensor,
     ) -> Tuple[Tensor, float, float, float]:
-        B, N = anchor.shape
-        anchors_probability = self.softmax(anchor)
-        positives_pobability = self.softmax(nearest_neighbor)
-        negative_probability = self.softmax(furthest_neighbor)
-
+        B, N = anchor_softmax.shape
         consistency_similarity = torch.bmm(
-            anchors_probability.view(B, 1, N),
-            positives_pobability.view(B, N, 1),
+            anchor_softmax.view(B, 1, N),
+            nearest_softmax.view(B, N, 1),
         ).squeeze() # (B,)
+
         positive_pseudolabel = torch.ones_like(consistency_similarity) # (B,)
-        consistency_loss = self.bceloss(
+        consistency_loss = self.bceloss.forward(
             consistency_similarity,
             positive_pseudolabel
         )
 
         negative_similarity = torch.bmm(
-            anchors_probability.view(B, 1, N),
-            negative_probability.view(B, N, 1),
+            anchor_softmax.view(B, 1, N),
+            furthest_softmax.view(B, N, 1),
         ).squeeze() # (B,)
+
         negative_pseudolabel = torch.zeros_like(negative_similarity) # (B,)
-        inconsistency_loss = self.bceloss(
+        inconsistency_loss = self.bceloss.forward(
             negative_similarity,
             negative_pseudolabel
         )
 
-        entropy_loss = self.entropy(
-            x=torch.mean(anchors_probability, dim=0),
-            input_as_probability=True,
-        )
+        total_loss = consistency_loss + inconsistency_loss
 
-        total_loss = consistency_loss \
-                    + self.inconsistency_weight * inconsistency_loss \
-                    - self.entropy_weight * entropy_loss
-        
-        return total_loss, \
-        consistency_loss.item(), \
-        inconsistency_loss.item(),\
-        entropy_loss.item()
+        return total_loss, consistency_loss.item(), inconsistency_loss.item()
+
+
+def entropy(
+    anchor: Tensor,
+    input_as_probability: bool = True,
+    entropy_weight: float = 5.0,
+) -> Tensor:
+    if input_as_probability:
+        anchor_ = torch.clamp(anchor, min=1e-8)
+        b = anchor_ * torch.log(anchor_)
+    else:
+        b = F.softmax(anchor, dim=1) * F.log_softmax(anchor, dim=1)
     
-    def entropy(
-        self,
-        x: Tensor,
-        input_as_probability: bool = True,
-    ) -> Tensor:
-        if input_as_probability:
-            x_ = torch.clamp(x, min=1e-8)
-            b = x_ * torch.log(x_)
-        else:
-            b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
-        
-        if len(b.size()) == 2:
-            return -b.sum(dim=1).mean()
-        elif len(b.size()) == 1:
-            return -b.sum()
-        else:
-            raise ValueError(
-                f'Expected input size to be 1 or 2, but got {b.size()}')
+    if len(b.size()) == 2:
+        return -b.sum(dim=1).mean() * entropy_weight
+    elif len(b.size()) == 1:
+        return -b.sum() * entropy_weight
+    else:
+        raise ValueError(
+            f'Expected input size to be 1 or 2, but got {b.size()}')
