@@ -314,14 +314,14 @@ class classificationloss():
         furthest_softmax: Tensor,
     ) -> Tuple[Tensor, float, float]:
         B, N = anchor_softmax.shape
-        consistency_similarity = torch.bmm(
+        positive_similarity = torch.bmm(
             anchor_softmax.view(B, 1, N),
             nearest_softmax.view(B, N, 1),
         ).squeeze() # (B,)
 
-        positive_pseudolabel = torch.ones_like(consistency_similarity) # (B,)
+        positive_pseudolabel = torch.ones_like(positive_similarity) # (B,)
         consistency_loss = self.bceloss.forward(
-            consistency_similarity,
+            positive_similarity,
             positive_pseudolabel
         )
 
