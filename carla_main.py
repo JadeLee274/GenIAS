@@ -63,7 +63,7 @@ def pretext(
     learning_rate: float = 1e-3,
     model_save_interval: int = 5,
     use_genias: bool = False,
-    num_neighbors: int = 5,
+    num_neighbors: int = 2,
 ) -> None:
     """
     Training code for CARLA pretext stage.
@@ -201,21 +201,25 @@ def pretext(
     anchor_features = torch.cat(anchor_features, dim=0).numpy()
     negative_features = torch.cat(negative_features, dim=0).numpy()
 
-    features = np.concatenate([anchor_features, negative_features], axis=0) 
-
-    print(f'\nSelecting top-{num_neighbors} nearest/furthest neighbors...')
-
-    nearest_neighbors = []
-    furthest_neighbors = []
-
     feature_dim = model.feature_dim
     index_searcher = IndexFlatL2(feature_dim)
+    features = np.concatenate([anchor_features, negative_features], axis=0)
     index_searcher.add(features)
 
     anchor_and_negative_pairs = np.concatenate(
         [train_dataset.anchors, train_dataset.negative_pairs],
         axis=0,
     )
+
+    classification_data_dir = f'classification_dataset/{dataset}'
+    
+    if not os.path.exists(classification_data_dir):
+        os.makedirs(classification_data_dir, exist_ok=True)
+
+    print(f'\nSelecting top-{num_neighbors} neighbors of the anchor...')
+
+    nearest_neighbors = []
+    furthest_neighbors = []
 
     for anchor_feature in tqdm(anchor_features):
         query = anchor_feature.reshape(1, -1)
@@ -229,23 +233,58 @@ def pretext(
         furthest_neighbors.append(
             anchor_and_negative_pairs[furthest_indices]
         )
-
-    classification_data_dir = f'classification_dataset/{dataset}'
     
-    if not os.path.exists(classification_data_dir):
-        os.makedirs(classification_data_dir, exist_ok=True)
-    
-    print('\nSaving nearest neighborhoods...')
+    print('\nSaving nearest neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
-        file=os.path.join(classification_data_dir, 'nearest_neighbors.npy'),
+        file=os.path.join(
+            classification_data_dir, 'anchor_nearest_neighbors.npy'
+        ),
         arr=nearest_neighbors,
     )
 
-    print('Saving furthest neighborhoods...')
+    print('Saving furthest neighborhoods of the anchor...')
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
-        file=os.path.join(classification_data_dir, 'furthest_neighbors.npy'),
+        file=os.path.join(
+            classification_data_dir, 'anchor_furthest_neighbors.npy'
+        ),
+        arr=furthest_neighbors,
+    )
+
+    print(f'\nSelecting top-{num_neighbors} neighbors of the negative pair...')
+
+    nearest_neighbors = []
+    furthest_neighbors = []
+
+    for anchor_feature in tqdm(negative_features):
+        query = anchor_feature.reshape(1, -1)
+        _, distance_based_indices = index_searcher.search(query, len(features))
+        distance_based_indices = distance_based_indices.reshape(-1)
+        nearest_indices = distance_based_indices[:num_neighbors]
+        furthest_indices = distance_based_indices[-num_neighbors:]
+        nearest_neighbors.append(
+            anchor_and_negative_pairs[nearest_indices]
+        )
+        furthest_neighbors.append(
+            anchor_and_negative_pairs[furthest_indices]
+        )
+    
+    print('\nSaving nearest neighborhoods of the anchor...')
+    nearest_neighbors = np.array(nearest_neighbors)
+    np.save(
+        file=os.path.join(
+            classification_data_dir, 'negative_pair_nearest_neighbors.npy'
+        ),
+        arr=nearest_neighbors,
+    )
+
+    print('Saving furthest neighborhoods of the anchor...')
+    furthest_neighbors = np.array(furthest_neighbors)
+    np.save(
+        file=os.path.join(
+            classification_data_dir, 'negative_pair_furthest_neighbors.npy'
+        ),
         arr=furthest_neighbors,
     )
 
@@ -321,15 +360,19 @@ def classification(
     for epoch in range(epochs):
         print(f'Epoch {epoch + 1} start.')
         epoch_loss = 0.0
+        epoch_consistency_loss = 0.0
+        epoch_inconsistency_loss = 0.0
+        epoch_entropy_loss = 0.0
 
         for batch in tqdm(train_loader):
             optimizer.zero_grad()
             anchor, nearest_neighbors, furthest_neighbors = batch
             anchor = anchor.to(device).float()
             anchor = anchor.transpose(-2, -1)
-            anchor = model.forward(anchor)
+            anchor_softmax = model.forward(anchor)
 
             nearest_neighbors = nearest_neighbors.to(device).float()
+            nearest_neighbors = nearest_neighbors
             furthest_neighbors = furthest_neighbors.to(device).float()
 
             loss = torch.zeros(1, device=device)
