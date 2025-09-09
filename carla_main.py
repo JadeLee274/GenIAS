@@ -151,7 +151,7 @@ def pretext(
 
             _inputs = _inputs.view(3 * B, F, W)
             _features = model(_inputs)
-            loss = criterion.forward(
+            loss = criterion(
                 features=_features,
                 current_loss=prev_loss,
             )
