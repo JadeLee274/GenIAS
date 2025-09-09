@@ -387,8 +387,8 @@ def classification(
             anchor_entropy_loss = entropy(anchor_softmax)
             negative_entropy_loss = entropy(negative_softmax)
 
-            batch_loss += anchor_entropy_loss
-            batch_loss += negative_entropy_loss
+            batch_loss -= anchor_entropy_loss
+            batch_loss -= negative_entropy_loss
 
             epoch_entropy_loss += anchor_entropy_loss.item()
             epoch_entropy_loss += negative_entropy_loss.item()
@@ -405,7 +405,7 @@ def classification(
                 anchor_nearest = anchor_nn[:, i].transpose(-2, -1)
                 anchor_furthest = anchor_fn[:, i].transpose(-2, -1)
                 negative_nearest = negative_nn[:, i].transpose(-2, -1)
-                negative_furthest = negative_fn[:, i].transpoze(-2, -1)
+                negative_furthest = negative_fn[:, i].transpose(-2, -1)
 
                 anchor_nearest_softmax = model.forward(anchor_nearest)
                 anchor_furthest_softmax = model.forward(anchor_furthest)
@@ -457,7 +457,7 @@ def classification(
         print(f' Anchor Consistency: {epoch_anchor_consistency_loss:.4e}')
         print(f' Anchor Inconsistency: {epoch_anchor_inconsistency_loss:.4e}')
         print(f' Negative Consistency: {epoch_negative_consistency_loss:.4e}')
-        print(f' Negative Inonsistency: {epoch_negative_inconsistency_loss:.4e}')
+        print(f' Negative Inconsistency: {epoch_negative_inconsistency_loss:.4e}')
         print(f' Entropy loss: {epoch_entropy_loss:.4e}')
         print(f' Total loss: {epoch_loss:.4e}\n')
 
