@@ -119,7 +119,10 @@ class ClassificationModel(nn.Module):
             out_features=num_classes,
             )
         
-        self._init_weights()
+        nn.init.xavier_normal_(self.classification_head.weight)
+        nn.init.zeros_(self.classification_head.bias)
+
+        self.softmax = nn.Softmax(dim=1)
 
     def forward(
         self,
@@ -129,33 +132,24 @@ class ClassificationModel(nn.Module):
         if forward_pass == 'default':
             feature = self.resnet(x)
             out = self.classification_head(feature)
+            out = self.softmax(out)
 
         elif forward_pass == 'backbone':
             feature = self.resnet(x)
-            out = feature
+            out = self.softmax(feature)
 
         elif forward_pass == 'head':
             out = self.classification_head(x)
+            out = self.softmax(out)
 
         elif forward_pass == 'return_all':
             feature = self.resnet(x)
             out = {
                 'feature': feature,
-                'output': self.classification_head(x),
+                'output': self.softmax(self.classification_head(x)),
             }
 
         else:
             raise ValueError(f'Invalid forward pass type {forward_pass}')
         
         return out
-    
-    def _init_weights(self) -> None:
-        for param in self.parameters():
-            if isinstance(param, nn.Linear):
-                nn.init.xavier_normal_(param.weight)
-                nn.init.zeros_(param.bias)
-            elif isinstance(param, nn.Conv1d):
-                nn.init.kaiming_normal_(param.weight)
-                nn.init.zeros_(param.bias)
-
-        return
