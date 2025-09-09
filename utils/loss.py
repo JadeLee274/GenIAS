@@ -312,7 +312,7 @@ class classificationloss():
         anchor_softmax: Tensor,
         nearest_softmax: Tensor,
         furthest_softmax: Tensor,
-    ) -> Tuple[Tensor, float, float, float]:
+    ) -> Tuple[Tensor, float, float]:
         B, N = anchor_softmax.shape
         consistency_similarity = torch.bmm(
             anchor_softmax.view(B, 1, N),
