@@ -6,7 +6,7 @@ from utils.common_import import *
 from utils.preprocess import *
 DATA_PATH = '/data/seungmin'
 VAE_PATH = '../checkpoints/vae'
-NEIGHBORHOODS_PATH = '/data/home/tmdals274/genias/classification_dataset'
+CLASSIFICATION_DATA_PATH = '/data/home/tmdals274/genias/classification_dataset'
 """
 Codes for loading data. These codes follows the papers
 
@@ -264,8 +264,7 @@ class PretextDataset(object):
         self.get_negative_pairs(patch_coef=patch_coef)
 
         print('Saving negative pairs for classification stage...')
-
-        classification_data_dir = f'classification_dataset/{dataset}'
+        classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
         np.save(
             file=os.path.join(classification_data_dir, 'negative_pairs.npy'),
             arr=self.negative_pairs,
@@ -449,15 +448,42 @@ class ClassificationDataset(object):
         self.mean = mean
         self.std = std
 
+        print('Loading anchors...')
         self.anchors = convert_to_windows(data=data, window_size=window_size)
         
-        neighbors_dir = os.path.join(NEIGHBORHOODS_PATH, dataset)
+        classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
 
-        self.nearest_neighbors = np.load(
-            os.path.join(neighbors_dir, 'nearest_neighbors.npy')
+        print('Loadinig nearest neighborhoods of anchor...')
+        self.anchor_nearest_neighbors = np.load(
+            os.path.join(
+                classification_data_dir, 'anchor_nearest_neighbors.npy'
+            )
         )
-        self.furthest_neighbors = np.load(
-            os.path.join(neighbors_dir, 'furthest_neighbors.npy')
+
+        print('Loadinig furthest neighborhoods of anchor...')
+        self.anchor_furthest_neighbors = np.load(
+            os.path.join(
+                classification_data_dir, 'anchor_furthest_neighbors.npy'
+            )
+        )
+
+        print('Loading negative pairs...')
+        self.negative_pairs = np.load(
+            os.path.join(classification_data_dir, 'negative_pairs.npy')
+        )
+
+        print('Loadinig nearest neighborhoods of negative pairs...')
+        self.negative_pairs_nearest_neighbors = np.load(
+            os.path.join(
+                classification_data_dir, 'negative_pair_nearest_neighbors.npy'
+            )
+        )
+
+        print('Loadinig furthest neighborhoods of negative pairs...')
+        self.negative_pairs_furthest_neighbors = np.load(
+            os.path.join(
+                classification_data_dir, 'negative_pair_furthest_neighbors.npy'
+            )
         )
 
         if labels is not None:
@@ -484,26 +510,51 @@ class ClassificationDataset(object):
         Tuple[NPTensor, NPTensor, NPTensor],
         Tuple[NPTensor, NPTensor, NPTensor, NPTensor],
     ]:
+        mean = self.mean
+        std = self.std
+
         if self.mode == 'train':
             anchor = self.anchors[idx]
-            nearest_neighbor = self.nearest_neighbors[idx]
-            furthest_neighbor = self.furthest_neighbors[idx]
+            anchor_nn = self.anchor_nearest_neighbors[idx]
+            anchor_fn = self.anchor_furthest_neighbors[idx]
 
-            anchor = (anchor - self.mean) / self.std
-            nearest_neighbor = (nearest_neighbor - self.mean) / self.std
-            furthest_neighbor = (furthest_neighbor - self.mean) / self.std
+            anchor = self._normalize(anchor, mean, std)
+            anchor_nn = self._normalize(anchor_nn, mean, std)
+            anchor_fn = self._normalize(anchor_fn, mean, std)
 
-            return anchor, nearest_neighbor, furthest_neighbor
+            negative = self.negative_pairs[idx]
+            negative_nn = self.negative_pairs_nearest_neighbors[idx]
+            negative_fn = self.negative_pairs_furthest_neighbors[idx]
+
+            negative = self._normalize(negative, mean, std)
+            negative_nn = self._normalize(negative_nn, mean, std)
+            negative_fn = self._normalize(negative_fn, mean, std)
+
+            return anchor, anchor_nn, anchor_fn, \
+                   negative, negative_nn, negative_fn
         
         elif self.mode == 'test':
             anchor = self.anchors[idx]
-            nearest_neighbor = self.nearest_neighbors[idx]
-            furthest_neighbor = self.furthest_neighbors[idx]
+            anchor_nn = self.anchor_nearest_neighbors[idx]
+            anchor_fn = self.anchor_furthest_neighbors[idx]
 
-            anchor = (anchor - self.mean) / self.std
-            nearest_neighbor = (nearest_neighbor - self.mean) / self.std
-            furthest_neighbor = (furthest_neighbor - self.mean) / self.std
+            anchor = self._normalize(anchor, mean, std)
+            anchor_nn = self._normalize(anchor_nn, mean, std)
+            anchor_fn = self._normalize(anchor_fn, mean, std)
+
+            negative = self.negative_pairs[idx]
+            negative_nn = self.negative_pairs_nearest_neighbors[idx]
+            negative_fn = self.negative_pairs_furthest_neighbors[idx]
+
+            negative = self._normalize(negative, mean, std)
+            negative_nn = self._normalize(negative_nn, mean, std)
+            negative_fn = self._normalize(negative_fn, mean, std)
 
             label = self.labels[idx]
 
-            return anchor, nearest_neighbor, furthest_neighbor, label
+            return anchor, anchor_nn, anchor_fn, \
+                   negative, negative_nn, negative_fn, \
+                   label
+    
+    def _normalize(x: Matrix, mean: Vector, std: Vector) -> Matrix:
+        return (x - mean) / std
