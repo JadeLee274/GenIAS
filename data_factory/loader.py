@@ -1,3 +1,4 @@
+from copy import deepcopy
 import pandas as pd
 from torch.utils.data import Dataset
 from genias.tcnvae import VAE
@@ -444,13 +445,17 @@ class ClassificationDataset(object):
             os.path.join(neighbors_dir, 'furthest_neighbors.npy')
         )
 
-        if labels:
+        if labels is not None:
             self.labels = convert_to_windows(
                 data=labels,
                 window_size=window_size
             )
+            self.unprocessed_labels = labels.astype(np.int32)
 
         self.mode = mode
+
+        self.unprocessed_data = deepcopy(data)
+        self.unprocessed_data = (self.unprocessed_data - self.mean) / self.std
 
         return
 
