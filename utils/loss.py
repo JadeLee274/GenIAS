@@ -304,12 +304,8 @@ class classificationloss():
     the entropy loss on the distribution of window and neighbors are applied 
     across classes.
     """
-    def __init__(
-        self,
-        entropy_weight: float = 5.0,
-    ) -> None:
+    def __init__(self) -> None:
         self.bceloss = nn.BCELoss()
-        self.entropy_weight = entropy_weight
 
     def __call__(
         self,
