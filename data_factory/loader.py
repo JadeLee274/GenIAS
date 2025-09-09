@@ -448,38 +448,32 @@ class ClassificationDataset(object):
         self.mean = mean
         self.std = std
 
-        print('Loading anchors...')
         self.anchors = convert_to_windows(data=data, window_size=window_size)
         
         classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
 
-        print('Loadinig nearest neighborhoods of anchor...')
         self.anchor_nns = np.load(
             os.path.join(
                 classification_data_dir, 'anchor_nns.npy'
             )
         )
 
-        print('Loadinig furthest neighborhoods of anchor...')
         self.anchor_fns = np.load(
             os.path.join(
                 classification_data_dir, 'anchor_fns.npy'
             )
         )
 
-        print('Loading negative pairs...')
         self.negative_pairs = np.load(
             os.path.join(classification_data_dir, 'negative_pairs.npy')
         )
 
-        print('Loadinig nearest neighborhoods of negative pairs...')
         self.negative_nns = np.load(
             os.path.join(
                 classification_data_dir, 'negative_nns.npy'
             )
         )
 
-        print('Loadinig furthest neighborhoods of negative pairs...')
         self.negative_fns = np.load(
             os.path.join(
                 classification_data_dir, 'negative_fns.npy'
@@ -507,8 +501,8 @@ class ClassificationDataset(object):
         self,
         idx: int
     ) -> Union[
-        Tuple[NPTensor, NPTensor, NPTensor],
-        Tuple[NPTensor, NPTensor, NPTensor, NPTensor],
+        Tuple[Matrix, NPTensor, NPTensor, Matrix, NPTensor, NPTensor],
+        Tuple[Matrix, NPTensor, NPTensor, Matrix, NPTensor, NPTensor, Matrix],
     ]:
         mean = self.mean
         std = self.std
@@ -518,17 +512,17 @@ class ClassificationDataset(object):
             anchor_nn = self.anchor_nns[idx]
             anchor_fn = self.anchor_fns[idx]
 
-            anchor = self._normalize(anchor, mean, std)
-            anchor_nn = self._normalize(anchor_nn, mean, std)
-            anchor_fn = self._normalize(anchor_fn, mean, std)
+            anchor = (anchor - mean) / std
+            anchor_nn = (anchor_nn - mean) / std
+            anchor_fn = (anchor_fn - mean) / std
 
             negative = self.negative_pairs[idx]
             negative_nn = self.negative_nns[idx]
             negative_fn = self.negative_fns[idx]
 
-            negative = self._normalize(negative, mean, std)
-            negative_nn = self._normalize(negative_nn, mean, std)
-            negative_fn = self._normalize(negative_fn, mean, std)
+            negative = (negative - mean) / std
+            negative_nn = (negative_nn - mean) / std
+            negative_fn = (negative_fn - mean) / std
 
             return anchor, anchor_nn, anchor_fn, \
                    negative, negative_nn, negative_fn
@@ -538,23 +532,20 @@ class ClassificationDataset(object):
             anchor_nn = self.anchor_nns[idx]
             anchor_fn = self.anchor_fns[idx]
 
-            anchor = self._normalize(anchor, mean, std)
-            anchor_nn = self._normalize(anchor_nn, mean, std)
-            anchor_fn = self._normalize(anchor_fn, mean, std)
+            anchor = (anchor - mean) / std
+            anchor_nn = (anchor_nn - mean) / std
+            anchor_fn = (anchor_fn - mean) / std
 
             negative = self.negative_pairs[idx]
             negative_nn = self.negative_nns[idx]
             negative_fn = self.negative_fns[idx]
 
-            negative = self._normalize(negative, mean, std)
-            negative_nn = self._normalize(negative_nn, mean, std)
-            negative_fn = self._normalize(negative_fn, mean, std)
+            negative = (negative - mean) / std
+            negative_nn = (negative_nn - mean) / std
+            negative_fn = (negative_fn - mean) / std
 
             label = self.labels[idx]
 
             return anchor, anchor_nn, anchor_fn, \
                    negative, negative_nn, negative_fn, \
                    label
-    
-    def _normalize(x: Matrix, mean: Vector, std: Vector) -> Matrix:
-        return (x - mean) / std
