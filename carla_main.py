@@ -375,17 +375,19 @@ def classification(
             anchor = anchor.to(device).float()
             anchor_nn = anchor_nn.to(device).float()
             anchor_fn = anchor_fn.to(device).float()
+
             negative = negative.to(device).float()
             negative_nn = negative_nn.to(device).float()
             negative_fn = negative_fn.to(device).float()
 
             anchor = anchor.transpose(-2, -1)
             negative = negative.transpose(-2, -1)
+            
             anchor_softmax = model.forward(anchor)
             negative_softmax = model.forward(negative)
 
-            anchor_entropy_loss = entropy(anchor_softmax)
-            negative_entropy_loss = entropy(negative_softmax)
+            anchor_entropy_loss = entropy(torch.mean(anchor_softmax, 0))
+            negative_entropy_loss = entropy(torch.mean(negative_softmax, 0))
 
             batch_loss -= anchor_entropy_loss
             batch_loss -= negative_entropy_loss
