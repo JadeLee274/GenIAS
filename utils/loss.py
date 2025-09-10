@@ -244,12 +244,12 @@ class pretextloss():
 
     def __call__(
         self,
-        features: Tensor,
+        representations: Tensor,
         current_loss: Optional[float] = None,
     ) -> Tensor:
         anchor, positive_pair, negative_pair = torch.split(
-            tensor=features,
-            split_size_or_sections=features.shape[0]//3,
+            tensor=representations,
+            split_size_or_sections=representations.shape[0]//3,
             dim=0,
         )
         anchor = F.normalize(anchor, dim=-1)
