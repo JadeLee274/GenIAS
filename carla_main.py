@@ -202,7 +202,7 @@ def pretext(
     negative_reps = torch.cat(negative_reps, dim=0).numpy()
     
     reps = np.concatenate([anchor_reps, negative_reps], axis=0)
-    num_negative_reps = reps.shape[0] // 2
+    num_negative_reps = negative_reps.shape[0]
 
     index_searcher = IndexFlatL2(reps.shape[1])
     index_searcher.add(reps)
