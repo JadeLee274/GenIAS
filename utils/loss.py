@@ -291,18 +291,16 @@ class classificationloss():
     """
     Classification loss for CARLA's self-supervised classification stage.
 
-    Parameters:
-        entropy_weight:       Weight for entropy loss. Default 2.0.
+    Optimizing this loss is to maximize the similarity between logits of window
+    and nearest neighbor, and minimize the similarity between logits of window
+    and furthest neighbor. By doing so, the model can classify the normal data
+    and anomalous data more clearly.
 
-    Optimizing this loss is for classifying the normal data to particular
-    class. It is designed to increase the similarity between the
-    representations of window and nearest neighborhoods, while decreasing that
-    of window and furthest neighborhoods, in the C-dimensional space where the
-    datas are sent by the classification model.
-    
-    In addition, to encourage class diversity and prevent overfitting, 
-    the entropy loss on the distribution of window and neighbors are applied 
-    across classes.
+    Parameters:
+        window_logit:   The logit of window. This can be both anchor and
+                        negative pair.
+        nearest_logit:  The logit of nearest neighbor.
+        furthest_logit: The logit of furthest neighbor.
     """
     def __init__(self) -> None:
         self.bceloss = nn.BCELoss()
@@ -346,6 +344,17 @@ def entropy(
     input_as_logit: bool = True,
     entropy_weight: float = 5.0,
 ) -> Tensor:
+    """
+    Customized entropy loss. In order to prevent overfitting and class 
+    diversity, this loss must be maximized.
+
+    Parameters:
+        x:              Logit.
+        input_as_logit: Whether the input is given as tensor or logit.
+                        Default True, since the ClassificationModel outputs
+                        the output state as logit.
+        entropy_weight: The weight of the entropy loss term. Default 5.0.
+    """
     if input_as_logit:
         x_ = torch.clamp(x, min=1e-8)
         b = x_ * torch.log(x_)

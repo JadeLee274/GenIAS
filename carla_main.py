@@ -224,11 +224,12 @@ def pretext(
     nearest_neighbors = []
     furthest_neighbors = []
 
-    for i, anchor_rep in tqdm(enumerate(anchor_reps)):
+    anchor_idx = 0
+    for anchor_rep in tqdm(anchor_reps):
         anchor_query = anchor_rep.reshape(1, -1)
         _, indices = index_searcher.search(anchor_query, reps.shape[0])
         indices = indices.reshape(-1)
-        indices = indices[indices != i]
+        indices = indices[indices != anchor_idx]
         nearest_indices = indices[:num_neighbors]
         furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
@@ -237,6 +238,7 @@ def pretext(
         furthest_neighbors.append(
             anchor_and_negative_pairs[furthest_indices]
         )
+        anchor_idx += 1
     
     print('\nSaving nearest neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
@@ -261,11 +263,12 @@ def pretext(
     nearest_neighbors = []
     furthest_neighbors = []
 
-    for j, negative_rep in tqdm(enumerate(negative_reps)):
+    negative_idx = 0
+    for negative_rep in tqdm(negative_reps):
         negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
-        indices = indices[indices != j + num_anchor_reps]
+        indices = indices[indices != negative_idx + num_anchor_reps]
         nearest_indices = indices[:num_neighbors]
         furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
@@ -274,6 +277,7 @@ def pretext(
         furthest_neighbors.append(
             anchor_and_negative_pairs[furthest_indices]
         )
+        negative_idx += 1
     
     print('\nSaving nearest neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
