@@ -205,6 +205,8 @@ def pretext(
     num_anchor_reps = anchor_reps.shape[0]
 
     index_searcher = IndexFlatL2(reps.shape[1])
+    assert index_searcher.d == reps.shape[1],\
+    f'{index_searcher.d} != {reps.shape[1]}'
     index_searcher.add(reps)
 
     anchor_and_negative_pairs = np.concatenate(
