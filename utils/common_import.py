@@ -10,4 +10,4 @@ import torch.nn as nn
 import torch.nn.functional as F
 Vector = np.ndarray
 Matrix = np.ndarray
-NPTensor = np.ndarray
+Array = np.ndarray

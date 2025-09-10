@@ -309,44 +309,44 @@ class classificationloss():
 
     def __call__(
         self,
-        anchor_softmax: Tensor,
-        nearest_softmax: Tensor,
-        furthest_softmax: Tensor,
+        window_logit: Tensor,
+        nearest_logit: Tensor,
+        furthest_logit: Tensor,
     ) -> Tuple[Tensor, float, float]:
-        B, N = anchor_softmax.shape
+        B, N = window_logit.shape
         positive_similarity = torch.bmm(
-            anchor_softmax.view(B, 1, N),
-            nearest_softmax.view(B, N, 1),
+            window_logit.view(B, 1, N),
+            nearest_logit.view(B, N, 1),
         ).squeeze() # (B,)
 
-        positive_pseudolabel = torch.ones_like(positive_similarity) # (B,)
-        consistency_loss = self.bceloss.forward(
+        ones = torch.ones_like(positive_similarity) # (B,)
+        consistency = self.bceloss.forward(
             positive_similarity,
-            positive_pseudolabel
+            ones
         )
 
         negative_similarity = torch.bmm(
-            anchor_softmax.view(B, 1, N),
-            furthest_softmax.view(B, N, 1),
+            window_logit.view(B, 1, N),
+            furthest_logit.view(B, N, 1),
         ).squeeze() # (B,)
 
-        negative_pseudolabel = torch.zeros_like(negative_similarity) # (B,)
-        inconsistency_loss = self.bceloss.forward(
+        zeros = torch.zeros_like(negative_similarity) # (B,)
+        inconsistency = self.bceloss.forward(
             negative_similarity,
-            negative_pseudolabel
+            zeros
         )
 
-        total_loss = consistency_loss + inconsistency_loss
+        consistency_sum = consistency + inconsistency
 
-        return total_loss, consistency_loss.item(), inconsistency_loss.item()
+        return consistency_sum, consistency.item(), inconsistency.item()
 
 
 def entropy(
     x: Tensor,
-    input_as_probability: bool = True,
+    input_as_logit: bool = True,
     entropy_weight: float = 5.0,
 ) -> Tensor:
-    if input_as_probability:
+    if input_as_logit:
         x_ = torch.clamp(x, min=1e-8)
         b = x_ * torch.log(x_)
     else:

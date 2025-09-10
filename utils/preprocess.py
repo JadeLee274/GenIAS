@@ -94,7 +94,7 @@ def min_max_normalize(x: Matrix) -> Matrix:
     return (x - min_x) / (max_x - min_x + 1e-4)
 
 
-def convert_to_windows(data: Matrix, window_size: int = 200) -> Tensor:
+def convert_to_windows(data: Matrix, window_size: int = 200) -> Array:
     windows = []
 
     for i in range(data.shape[0] - window_size + 1):
@@ -153,10 +153,7 @@ def get_mean_std(x: Matrix) -> Vector:
     return mean, std
 
 
-def noise_transformation(
-    x: Matrix,
-    sigma: float = 0.01
-) -> Tensor:
+def noise_transformation(x: Matrix, sigma: float = 0.01) -> Matrix:
     """
     Inject Gaussian noise with to data.
     Used for choosing positive pair of first 10 windows.
