@@ -202,7 +202,7 @@ def pretext(
     negative_reps = torch.cat(negative_reps, dim=0).numpy()
     
     reps = np.concatenate([anchor_reps, negative_reps], axis=0)
-    num_negative_reps = anchor_reps.shape[0]
+    num_anchor_reps = anchor_reps.shape[0]
 
     index_searcher = IndexFlatL2(reps.shape[1])
     index_searcher.add(reps)
@@ -263,7 +263,7 @@ def pretext(
         negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
-        indices = indices[indices != j + num_negative_reps]
+        indices = indices[indices != j + num_anchor_reps]
         nearest_indices = indices[:num_neighbors]
         furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
