@@ -3,7 +3,6 @@ import argparse
 from math import cos, pi
 from tqdm import tqdm
 from faiss import IndexFlatL2
-from torch.nn import Softmax
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from sklearn.metrics import precision_recall_curve, auc
@@ -449,11 +448,11 @@ def classification(
 
     test_dataset = ClassificationDataset(dataset='MSL', mode='test')
     test_data = torch.tensor(
-        data=test_dataset.unprocessed_data,
+        data=test_dataset.data,
         dtype=torch.float32
     )
     test_data = test_data.unsqueeze(1).transpose(-2, -1).to(device)
-    labels = test_dataset.unprocessed_labels.reshape(-1)
+    labels = test_dataset.labels.reshape(-1)
 
     model.eval()
 
@@ -508,12 +507,11 @@ def classification(
 
     print('\nResults')
 
-    print(f'\nBest F1 score: {round(best_fl, 4)}')
-    print(f'Best Precision: {round(best_precision, 4)}')
-    print(f'Best Recall: {round(best_recall, 4)}')
-    print(f'Best Threshold: {best_threshold:.4e}')
-
-    print(f'\nAUC-PR: {round(auc_pr, 4)}')
+    print(f'\n- Best F1 score: {round(best_fl, 4)}')
+    print(f'- Best Precision: {round(best_precision, 4)}')
+    print(f'- Best Recall: {round(best_recall, 4)}')
+    print(f' -Best Threshold: {best_threshold:.4e}')
+    print(f'\n- AUC-PR: {round(auc_pr, 4)}')
 
     return 
 

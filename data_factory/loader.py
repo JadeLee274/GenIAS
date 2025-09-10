@@ -257,10 +257,7 @@ class PretextDataset(object):
         elif dataset in ['SMAP', 'Yahoo']:
             patch_coef = 0.2
         
-        print('Getting positive pairs...')
         self.get_positive_pairs()
-
-        print('Getting negative pairs...')
         self.get_negative_pairs(patch_coef=patch_coef)
 
         print('Saving negative pairs for classification stage...')
@@ -484,6 +481,10 @@ class ClassificationDataset(object):
                 )
             )
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
+        
+        else:
+            self.data = (data - mean) / std
+            self.labels = labels
 
         return
 
@@ -509,4 +510,4 @@ class ClassificationDataset(object):
             return window, nearest_neighbor, furthest_neighbor
         
         else:
-            return
+            return self.data[idx]
