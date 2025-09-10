@@ -5,8 +5,8 @@ from genias.tcnvae import VAE
 from utils.common_import import *
 from utils.preprocess import *
 DATA_PATH = '/data/seungmin'
-VAE_PATH = '../checkpoints/vae'
 CLASSIFICATION_DATA_PATH = '/data/home/tmdals274/genias/classification_dataset'
+VAE_PATH = '../checkpoints/vae'
 """
 Codes for loading data. These codes follows the papers
 
@@ -403,6 +403,7 @@ class ClassificationDataset(object):
     ) -> None:
         assert mode in ['train', 'test'], \
         "mode must be either 'train' or 'test'"
+        self.mode = mode
 
         data = None
         labels = None
@@ -448,104 +449,64 @@ class ClassificationDataset(object):
         self.mean = mean
         self.std = std
 
-        self.anchors = convert_to_windows(data=data, window_size=window_size)
-        
-        classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
+        if mode == 'train':
+            classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
 
-        self.anchor_nns = np.load(
-            os.path.join(
-                classification_data_dir, 'anchor_nns.npy'
+            # Loads anchors and corresponding negative pairs
+            anchors = convert_to_windows(data=data, window_size=window_size)
+            negative_pairs = np.load(
+                os.path.join(classification_data_dir, 'negative_pairs.npy')
             )
-        )
-
-        self.anchor_fns = np.load(
-            os.path.join(
-                classification_data_dir, 'anchor_fns.npy'
+            self.windows = np.concatenate([anchors, negative_pairs], axis=0)
+            
+            # Loads nearest neighbors
+            anchor_nns = np.load(
+                os.path.join(
+                    classification_data_dir, 'anchor_nns.npy'
+                )
             )
-        )
-
-        self.negative_pairs = np.load(
-            os.path.join(classification_data_dir, 'negative_pairs.npy')
-        )
-
-        self.negative_nns = np.load(
-            os.path.join(
-                classification_data_dir, 'negative_nns.npy'
+            negative_nns = np.load(
+                os.path.join(
+                    classification_data_dir, 'negative_nns.npy'
+                )
             )
-        )
+            self.nns = np.concatenate([anchor_nns, negative_nns], axis=0)
 
-        self.negative_fns = np.load(
-            os.path.join(
-                classification_data_dir, 'negative_fns.npy'
+            # Loads furthest neighbors
+            anchor_fns = np.load(
+                os.path.join(
+                    classification_data_dir, 'anchor_fns.npy'
+                )
             )
-        )
-
-        if labels is not None:
-            self.labels = convert_to_windows(
-                data=labels,
-                window_size=window_size
+            negative_fns = np.load(
+                os.path.join(
+                    classification_data_dir, 'negative_fns.npy'
+                )
             )
-            self.unprocessed_labels = labels.astype(np.int32)
-
-        self.mode = mode
-
-        self.unprocessed_data = deepcopy(data)
-        self.unprocessed_data = (self.unprocessed_data - self.mean) / self.std
+            self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
 
         return
 
     def __len__(self) -> int:
-        return self.anchors.shape[0]
+        return self.windows.shape[0]
     
     def __getitem__(
         self,
         idx: int
-    ) -> Union[
-        Tuple[Matrix, NPTensor, NPTensor, Matrix, NPTensor, NPTensor],
-        Tuple[Matrix, NPTensor, NPTensor, Matrix, NPTensor, NPTensor, Matrix],
-    ]:
+    ) -> Optional[Tuple[Matrix, Array, Array]]:
         mean = self.mean
         std = self.std
 
         if self.mode == 'train':
-            anchor = self.anchors[idx]
-            anchor_nn = self.anchor_nns[idx]
-            anchor_fn = self.anchor_fns[idx]
+            window = self.windows[idx]
+            nearest_neighbor = self.nns[idx]
+            furthest_neighbor = self.fns[idx]
 
-            anchor = (anchor - mean) / std
-            anchor_nn = (anchor_nn - mean) / std
-            anchor_fn = (anchor_fn - mean) / std
+            window = (window - mean) / std
+            nearest_neighbor = (nearest_neighbor - mean) / std
+            furthest_neighbor = (furthest_neighbor - mean) / std
 
-            negative = self.negative_pairs[idx]
-            negative_nn = self.negative_nns[idx]
-            negative_fn = self.negative_fns[idx]
-
-            negative = (negative - mean) / std
-            negative_nn = (negative_nn - mean) / std
-            negative_fn = (negative_fn - mean) / std
-
-            return anchor, anchor_nn, anchor_fn, \
-                   negative, negative_nn, negative_fn
+            return window, nearest_neighbor, furthest_neighbor
         
-        elif self.mode == 'test':
-            anchor = self.anchors[idx]
-            anchor_nn = self.anchor_nns[idx]
-            anchor_fn = self.anchor_fns[idx]
-
-            anchor = (anchor - mean) / std
-            anchor_nn = (anchor_nn - mean) / std
-            anchor_fn = (anchor_fn - mean) / std
-
-            negative = self.negative_pairs[idx]
-            negative_nn = self.negative_nns[idx]
-            negative_fn = self.negative_fns[idx]
-
-            negative = (negative - mean) / std
-            negative_nn = (negative_nn - mean) / std
-            negative_fn = (negative_fn - mean) / std
-
-            label = self.labels[idx]
-
-            return anchor, anchor_nn, anchor_fn, \
-                   negative, negative_nn, negative_fn, \
-                   label
+        else:
+            return
