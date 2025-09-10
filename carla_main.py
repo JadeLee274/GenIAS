@@ -145,15 +145,15 @@ def pretext(
             positive_pair = positive_pair.to(device)
             negative_pair = negative_pair.to(device)
 
-            _inputs = torch.cat(
+            triplets = torch.cat(
                 tensors=[anchor, positive_pair, negative_pair],
                 dim=0
             ).float()
 
-            _inputs = _inputs.view(3 * B, F, W)
-            _features = model(_inputs)
+            triplets = triplets.view(3 * B, F, W)
+            representations = model(triplets)
             loss = criterion(
-                features=_features,
+                representations=representations,
                 current_loss=prev_loss,
             )
             loss.backward()
@@ -174,7 +174,7 @@ def pretext(
                 f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
             )
 
-    print('Pretext training done.\n')
+    print('Pretext training done. Start selecting neighborhoods...\n')
       
     model.eval()
 
@@ -187,12 +187,12 @@ def pretext(
     anchor_reps = []
     negative_reps = []
 
-    print('Loading features of each anchor and its negative pair.')
+    print('Loading representations of each anchor and its negative pair.')
 
     for batch in tqdm(timeseries_loader):
         anchor, _, negative_pair = batch
-        anchor = anchor.to(device).float().transpose(1, 2)
-        negative_pair = negative_pair.to(device).float().transpose(1, 2)
+        anchor = anchor.to(device).float().transpose(-2, -1)
+        negative_pair = negative_pair.to(device).float().transpose(-2, -1)
         anchor_rep = model.forward(anchor).detach().cpu()
         negative_rep = model.forward(negative_pair).detach().cpu()
         anchor_reps.append(anchor_rep)
@@ -202,6 +202,7 @@ def pretext(
     negative_reps = torch.cat(negative_reps, dim=0).numpy()
     
     reps = np.concatenate([anchor_reps, negative_reps], axis=0)
+    num_negative_reps = reps.shape[0] // 2
 
     index_searcher = IndexFlatL2(reps.shape[1])
     index_searcher.add(reps)
@@ -221,10 +222,11 @@ def pretext(
     nearest_neighbors = []
     furthest_neighbors = []
 
-    for anchor_rep in tqdm(anchor_reps):
+    for i, anchor_rep in tqdm(enumerate(anchor_reps)):
         anchor_query = anchor_rep.reshape(1, -1)
         _, indices = index_searcher.search(anchor_query, reps.shape[0])
         indices = indices.reshape(-1)
+        indices = indices[indices != i]
         nearest_indices = indices[:num_neighbors]
         furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
@@ -257,12 +259,13 @@ def pretext(
     nearest_neighbors = []
     furthest_neighbors = []
 
-    for negative_feature in tqdm(negative_reps):
-        negative_query = negative_feature.reshape(1, -1)
+    for j, negative_rep in tqdm(enumerate(negative_reps)):
+        negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
+        indices = indices[indices != j + num_negative_reps]
         nearest_indices = indices[:num_neighbors]
-        furthest_indices = indices[num_neighbors:]
+        furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
             anchor_and_negative_pairs[nearest_indices]
         )
@@ -354,6 +357,7 @@ def classification(
     )
     criterion = classificationloss()
 
+    model.train()
     print('Classification training loop start...\n')
 
     for epoch in range(epochs):
@@ -434,6 +438,7 @@ def classification(
     
     print('Classification training done.')
 
+    model.eval()
     print('\nStarting inference...')
 
     test_dataset = ClassificationDataset(dataset='MSL', mode='test')
