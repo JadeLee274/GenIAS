@@ -4,9 +4,10 @@ from torch.utils.data import Dataset
 from genias.tcnvae import VAE
 from utils.common_import import *
 from utils.preprocess import *
-DATA_PATH = '/data/seungmin'
-CLASSIFICATION_DATA_PATH = '/data/home/tmdals274/genias/classification_dataset'
+
+DATA_PATH = 'data'
 VAE_PATH = '../checkpoints/vae'
+CLASSIFICATION_DATA_PATH = 'classification_dataset'
 """
 Codes for loading data. These codes follows the papers
 
@@ -261,7 +262,11 @@ class PretextDataset(object):
         self.get_negative_pairs(patch_coef=patch_coef)
 
         print('Saving negative pairs for classification stage...')
-        classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
+        classification_data_dir = os.path.join(
+            CLASSIFICATION_DATA_PATH, dataset
+        )
+        os.makedirs(classification_data_dir, exist_ok=True)
+
         np.save(
             file=os.path.join(classification_data_dir, 'negative_pairs.npy'),
             arr=self.negative_pairs,
