@@ -267,8 +267,6 @@ class PretextDataset(object):
             arr=self.negative_pairs,
         )
 
-        print('Dataset loaded.\n')
-   
     def get_positive_pairs(self) -> None:
         positive_pairs = []
 
@@ -454,6 +452,11 @@ class ClassificationDataset(object):
             negative_pairs = np.load(
                 os.path.join(classification_data_dir, 'negative_pairs.npy')
             )
+            # windows = []
+            # for i in range(anchors.shape[0]):
+            #     windows.append(anchors[i])
+            #     windows.append(negative_pairs[i])
+            # self.windows = np.array(windows)
             self.windows = np.concatenate([anchors, negative_pairs], axis=0)
             
             # Loads nearest neighbors
@@ -467,6 +470,11 @@ class ClassificationDataset(object):
                     classification_data_dir, 'negative_nns.npy'
                 )
             )
+            # nns = []
+            # for i in range(anchor_nns.shape[0]):
+            #     nns.append(anchor_nns[i])
+            #     nns.append(negative_nns[i])
+            # self.nns = np.array(nns)
             self.nns = np.concatenate([anchor_nns, negative_nns], axis=0)
 
             # Loads furthest neighbors
@@ -480,6 +488,11 @@ class ClassificationDataset(object):
                     classification_data_dir, 'negative_fns.npy'
                 )
             )
+            # fns = []
+            # for i in range(anchor_fns.shape[0]):
+            #     fns.append(anchor_fns[i])
+            #     fns.append(negative_fns[i])
+            # self.fns = np.array(fns)
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
         
         else:

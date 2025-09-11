@@ -64,10 +64,10 @@ class PretextModel(nn.Module):
     def _init_weights(self) -> None:
         for param in self.parameters():
             if isinstance(param, nn.Linear):
-                nn.init.xavier_normal_(param.weight)
+                nn.init.kaiming_normal_(param.weight)
                 nn.init.zeros_(param.bias)
             elif isinstance(param, nn.Conv1d):
-                nn.init.kaiming_normal_(param.weight)
+                nn.init.xavier_normal_(param.weight)
                 nn.init.zeros_(param.bias)
 
         return
@@ -119,7 +119,7 @@ class ClassificationModel(nn.Module):
             out_features=num_classes,
             )
         
-        nn.init.xavier_normal_(self.classification_head.weight)
+        nn.init.xavier_uniform_(self.classification_head.weight)
         nn.init.zeros_(self.classification_head.bias)
 
         self.softmax = nn.Softmax(dim=1)

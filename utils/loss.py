@@ -232,13 +232,11 @@ class pretextloss():
     """
     def __init__(
         self,
-        batch_size: int,
         temperature: float = 0.4,
         initial_margin: float = 1.0,
         adjust_factor: float = 0.1,
     ) -> None:
         self.temperature = temperature
-        self.batch_size = batch_size
         self.margin = initial_margin
         self.adjust_factor = adjust_factor
 

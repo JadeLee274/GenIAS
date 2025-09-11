@@ -113,7 +113,7 @@ def pretext(
     device = torch.device(f'cuda:{gpu_num}')
 
     model = model.to(device)
-    criterion = pretextloss(batch_size=batch_size)
+    criterion = pretextloss()
 
     train_loader = DataLoader(
         dataset=train_dataset,
@@ -538,7 +538,7 @@ if __name__ == '__main__':
         '--batch-size',
         type=int,
         default=50,
-        help="Batch size. Default 100."
+        help="Batch size. Default 50."
     )
     args.add_argument(
         '--gpu-num',
