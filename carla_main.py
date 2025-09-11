@@ -1,17 +1,16 @@
-import argparse
+import argparse, logging
 from math import cos, pi
 from tqdm import tqdm
 from faiss import IndexFlatL2
 from torch.nn import Softmax
 from sklearn.metrics import f1_score, roc_auc_score, \
                             precision_recall_curve, auc
-from utils.common_import import *
 from data_factory.loader import PretextDataset, ClassificationDataset
 from torch.utils.data import DataLoader
+from datetime import datetime
 import torch.optim as optim
 from carla.model import PretextModel, ClassificationModel
-from utils.loss import pretextloss, classificationloss, entropy
-
+from utils import *
 
 def str2bool(v: str) -> bool:
     """
@@ -56,6 +55,7 @@ def cosine_schedule(
 
 def pretext(
     dataset: str,
+    log_dir: str,
     window_size: int = 200,
     epochs: int = 30,
     batch_size: int = 50,
@@ -70,6 +70,7 @@ def pretext(
 
     Parameters:
         dataset:             Name of the training dataset.
+        log_dir:             Log directory.
         window_size:         Window size. Default 200.
         batch_size:          Batch size. Default 50.
         gpu_num:             The model is trained in this GPU. Default 0.
@@ -105,11 +106,6 @@ def pretext(
         mid_channels=4,
     )
     
-    ckpt_dir = os.path.join(f'checkpoints/carla_pretext/{dataset}')
-    
-    if not os.path.exists(ckpt_dir):
-        os.makedirs(ckpt_dir, exist_ok=True)
-
     device = torch.device(f'cuda:{gpu_num}')
 
     model = model.to(device)
@@ -127,7 +123,7 @@ def pretext(
     )
 
     model.train()
-    print('Pretext training loop start...\n')
+    logging.info('Pretext training loop start...\n')
 
     for epoch in range(epochs):
         print(f'Epoch {epoch + 1} start.')
@@ -161,7 +157,7 @@ def pretext(
             epoch_loss += prev_loss
         
         epoch_loss /= len(train_loader)
-        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+        logging.info(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
@@ -170,11 +166,12 @@ def pretext(
                     'contrastive_head': model.contrastive_head.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
+                f=os.path.join(
+                    log_dir, 'model_pretext', f'epoch_{epoch + 1}.pt'
+                    )
             )
 
     print('Pretext training done.\n')
-      
     resnet = model.resnet
     resnet.eval()
 
@@ -295,6 +292,7 @@ def pretext(
 
 def classification(
     dataset: str,
+    call_model_dir: str,
     window_size: int = 200,
     batch_size: int = 100,
     gpu_num: int = 0,
@@ -307,6 +305,8 @@ def classification(
 
     Parameters:
         dataset:             Name of the dataset.
+        model_dir:           The direction for calling the pretext model.
+        call_model_dir:      The path where the pretext model is saved. 
         window_size:         Window size. Default 200.
         batch_size:          Batch size. Default 100.
         gpu_num:             The model is trained in this GPU. Default 0.
@@ -335,14 +335,13 @@ def classification(
     )
     data_dim = train_dataset.data_dim
 
-    resnet_dir = os.path.join('checkpoints/carla_pretext', dataset)
-    resnet_ckpt = torch.load(os.path.join(resnet_dir, 'epoch_30.pt'))
+    resnet_ckpt = torch.load(os.path.join(
+        call_model_dir, 'model_pretext', 'epoch_30.pt'
+        ))
     model = ClassificationModel(in_channels=data_dim)
     model.resnet.load_state_dict(resnet_ckpt['resnet'])
     model = model.to(device)
 
-    ckpt_dir = os.path.join(f'checkpoints/carla_classification/{dataset}')
-    
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
@@ -455,13 +454,13 @@ def classification(
         epoch_negative_inconsistency_loss /= len(train_loader)
         epoch_entropy_loss /= len(train_loader)
         
-        print(f'Epoch {epoch + 1} finished.')
-        print(f' Anchor Consistency: {epoch_anchor_consistency_loss:.4e}')
-        print(f' Anchor Inconsistency: {epoch_anchor_inconsistency_loss:.4e}')
-        print(f' Negative Consistency: {epoch_negative_consistency_loss:.4e}')
-        print(f' Negative Inconsistency: {epoch_negative_inconsistency_loss:.4e}')
-        print(f' Entropy loss: {epoch_entropy_loss:.4e}')
-        print(f' Total loss: {epoch_loss:.4e}\n')
+        logging.info(f'Epoch {epoch + 1} finished.')
+        logging.info(f' Anchor Consistency: {epoch_anchor_consistency_loss:.4e}')
+        logging.info(f' Anchor Inconsistency: {epoch_anchor_inconsistency_loss:.4e}')
+        logging.info(f' Negative Consistency: {epoch_negative_consistency_loss:.4e}')
+        logging.info(f' Negative Inconsistency: {epoch_negative_inconsistency_loss:.4e}')
+        logging.info(f' Entropy loss: {epoch_entropy_loss:.4e}')
+        logging.info(f' Total loss: {epoch_loss:.4e}\n')
 
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
@@ -470,8 +469,10 @@ def classification(
                     'model': model.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt'),
-            )
+                f=os.path.join(
+                    log_dir, 'model_classification', f'epoch_{epoch + 1}.pt'
+                    ),
+                )
     
     print('Classification training done.')
 
@@ -531,7 +532,7 @@ def classification(
 
     precision, recall, _ = precision_recall_curve(
         y_true=labels,
-        probas_pred=anomaly_scores,
+        y_score=anomaly_scores,
     )
 
     auc_pr = auc(recall, precision)
@@ -547,14 +548,42 @@ def classification(
 if __name__ == '__main__':
     args = argparse.ArgumentParser()
     args.add_argument(
+        '--exp-name',
+        type=str,
+        help="Experience name. Logs will be classified with this argument."
+    )
+    args.add_argument(
         '--task',
         type=str,
         help="Which model to train. Either 'pretext' or 'classification'."
     )
     args.add_argument(
+        '--classification-model-dir',
+        type=str,
+        help="Path for calling the saved pretext model."
+    )
+    args.add_argument(
         '--dataset',
         type=str,
         help="Name of the dataset."
+    )
+    args.add_argument(
+        '--seed',
+        type=int, 
+        default=42,
+        help="Fixed Seed. Default 42."
+    )
+    args.add_argument(
+        '--use-wandb',
+        type=bool, 
+        default=False,
+        help="Control whether use wandb log or not. Default False."
+    )
+    args.add_argument(
+        '--save-ckpt',
+        type=bool, 
+        default=False,
+        help="Save the checkpoint. Default False."
     )
     args.add_argument(
         '--window-size',
@@ -621,10 +650,33 @@ if __name__ == '__main__':
 
     assert config.task in ['pretext', 'classification'], \
     "task must be either 'pretext' or 'classification'."
+    if config.task == 'classification':
+        assert config.classification_model_dir is not None
+    
+    log_time = datetime.now().strftime('%y%m%d_%H%M%S')
+    log_dir = os.path.join('logs', config.task + config.exp_name + f'_{log_time}')
+    model_dir = os.path.join(log_dir, 'model_' + config.task)
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(model_dir, exist_ok=True)
+    set_logging_filehandler(
+        log_file_path=os.path.join(
+            log_dir, 'train_' + config.task + '.log'
+        )
+    )
+    fix_seed_all(config.seed)
+    if config.use_wandb:
+        import wandb
+        run = wandb.init(
+            project='GenIAS',
+            entity='ahn40200393-seoul-national-university',
+            name=config.exp_name,
+            config=vars(config),
+        )
 
     if config.task == 'pretext':
         pretext(
             dataset=config.dataset,
+            log_dir=log_dir,
             window_size=config.window_size,
             batch_size=config.batch_size,
             gpu_num=config.gpu_num,
@@ -637,6 +689,7 @@ if __name__ == '__main__':
     if config.task == 'classification':
         classification(
             dataset=config.dataset,
+            call_model_dir=config.classification_model_dir,
             window_size=config.window_size,
             batch_size=config.batch_size,
             gpu_num=config.gpu_num,
