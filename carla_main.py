@@ -199,7 +199,6 @@ def pretext(
     negative_reps = torch.cat(negative_reps, dim=0).numpy()
     
     reps = np.concatenate([anchor_reps, negative_reps], axis=0)
-    num_anchor_reps = anchor_reps.shape[0]
 
     index_searcher = IndexFlatL2(reps.shape[1])
     assert index_searcher.d == reps.shape[1],\
@@ -221,13 +220,11 @@ def pretext(
     nearest_neighbors = []
     furthest_neighbors = []
 
-    anchor_idx = 0
     for anchor_rep in tqdm(anchor_reps):
         anchor_query = anchor_rep.reshape(1, -1)
         _, indices = index_searcher.search(anchor_query, reps.shape[0])
         indices = indices.reshape(-1)
-        indices = indices[indices != anchor_idx]
-        nearest_indices = indices[:num_neighbors]
+        nearest_indices = indices[1:num_neighbors + 1]
         furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
             anchor_and_negative_pairs[nearest_indices]
@@ -235,7 +232,6 @@ def pretext(
         furthest_neighbors.append(
             anchor_and_negative_pairs[furthest_indices]
         )
-        anchor_idx += 1
     
     print('\nSaving nearest neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
@@ -260,13 +256,11 @@ def pretext(
     nearest_neighbors = []
     furthest_neighbors = []
 
-    negative_idx = 0
     for negative_rep in tqdm(negative_reps):
         negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
-        indices = indices[indices != negative_idx + num_anchor_reps]
-        nearest_indices = indices[:num_neighbors]
+        nearest_indices = indices[1:num_neighbors + 1]
         furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
             anchor_and_negative_pairs[nearest_indices]
@@ -274,7 +268,6 @@ def pretext(
         furthest_neighbors.append(
             anchor_and_negative_pairs[furthest_indices]
         )
-        negative_idx += 1
     
     print('\nSaving nearest neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
@@ -508,7 +501,6 @@ def classification(
             best_threshold = thresholds[i]
 
     print('\nResults')
-
     logging.info(f'\n- Best F1 score: {round(best_fl, 4)}')
     logging.info(f'- Best Precision: {round(best_precision, 4)}')
     logging.info(f'- Best Recall: {round(best_recall, 4)}')
@@ -621,7 +613,7 @@ if __name__ == '__main__':
         assert config.classification_model_dir is not None
     
     log_time = datetime.now().strftime('%y%m%d_%H%M%S')
-    log_dir = os.path.join('logs', config.task + config.exp_name + f'_{log_time}')
+    log_dir = os.path.join('logs', config.task + '_' + config.exp_name + f'_{log_time}')
     model_dir = os.path.join(log_dir, 'model_' + config.task)
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)

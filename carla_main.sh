@@ -1,7 +1,7 @@
 python carla_main.py \
     --exp-name debug \
     --task classification \
-    --classification-model-dir logs/debug_250910_210629 \
-    --use-wandb True \
+    --use-wandb False \
     --dataset MSL \
-    --gpu-num 0
+    --gpu-num 0 \
+    --classification-model-dir logs/pretext_debug_250911_200736 \
