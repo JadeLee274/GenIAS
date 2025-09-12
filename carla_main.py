@@ -94,198 +94,213 @@ def pretext(
     The model is saved once in a model_save_interval epochs, in order to be
     used for the self-supervised stage of CARLA.
     """
-    train_dataset = PretextDataset(
-        dataset=dataset,
-        window_size=window_size,
-        mode='train',
-        use_genias=use_genias,
-    )
-    
-    model = PretextModel(
-        in_channels=train_dataset.data_dim,
-        mid_channels=4,
-    )
-    
-    device = torch.device(f'cuda:{gpu_num}')
-
-    model = model.to(device)
-    criterion = pretextloss()
-
-    train_loader = DataLoader(
-        dataset=train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-    )
-
-    optimizer = optim.Adam(
-        params=model.parameters(),
-        lr=learning_rate,
-    )
-
-    model.train()
     logging.info('Pretext training loop start...\n')
+    for sub_dataset in os.listdir(os.path.join('data', dataset, 'train')):
+        logging.info(f'{sub_dataset} dataset loop')
+        train_dataset = PretextDataset(
+            dataset=dataset,
+            sub_dataset=sub_dataset,
+            window_size=window_size,
+            mode='train',
+            use_genias=use_genias,
+        )
+    
+        model = PretextModel(
+            in_channels=train_dataset.data_dim,
+            mid_channels=4,
+        )
+    
+        device = torch.device(f'cuda:{gpu_num}')
 
-    for epoch in range(epochs):
-        print(f'Epoch {epoch + 1} start.')
+        model = model.to(device)
+        criterion = pretextloss()
 
-        cosine_schedule(optimizer=optimizer, current_epoch=epoch)
-        epoch_loss = 0.0
-        prev_loss = None
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+        )
 
-        for batch in tqdm(train_loader):
-            optimizer.zero_grad()
-            anchor, positive_pair, negative_pair = batch
-            B, W, F = anchor.shape
-            anchor = anchor.to(device)
-            positive_pair = positive_pair.to(device)
-            negative_pair = negative_pair.to(device)
+        optimizer = optim.Adam(
+            params=model.parameters(),
+            lr=learning_rate,
+        )
 
-            triplets = torch.cat(
-                tensors=[anchor, positive_pair, negative_pair],
-                dim=0
-            ).float()
+        model.train()
 
-            triplets = triplets.view(3 * B, F, W)
-            representations = model(triplets)
-            loss = criterion(
-                representations=representations,
-                current_loss=prev_loss,
-            )
-            loss.backward()
-            optimizer.step()
-            prev_loss = loss.item()
-            epoch_loss += prev_loss
+        for epoch in range(epochs):
+            print(f'Epoch {epoch + 1} start.')
+
+            cosine_schedule(optimizer=optimizer, current_epoch=epoch)
+            epoch_loss = 0.0
+            prev_loss = None
+
+            for batch in tqdm(train_loader):
+                optimizer.zero_grad()
+                anchor, positive_pair, negative_pair = batch
+                B, W, F = anchor.shape
+                anchor = anchor.to(device)
+                positive_pair = positive_pair.to(device)
+                negative_pair = negative_pair.to(device)
+
+                triplets = torch.cat(
+                    tensors=[anchor, positive_pair, negative_pair],
+                    dim=0
+                ).float()
+
+                triplets = triplets.view(3 * B, F, W)
+                representations = model(triplets)
+                loss = criterion(
+                    representations=representations,
+                    current_loss=prev_loss,
+                )
+                loss.backward()
+                optimizer.step()
+                prev_loss = loss.item()
+                epoch_loss += prev_loss
+            
+            epoch_loss /= len(train_loader)
+            logging.info(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+
+            if epoch == 0 or (epoch + 1) % model_save_interval == 0:
+                torch.save(
+                    obj={
+                        'resnet': model.resnet.state_dict(),
+                        'contrastive_head': model.contrastive_head.state_dict(),
+                        'optim': optimizer.state_dict(),
+                    },
+                    f=os.path.join(
+                        log_dir, 'model_pretext', f'{sub_dataset.replace(
+                            '.npy', ''
+                            )}_epoch_{epoch + 1}.pt'
+                        )
+                )
+
+        logging.info(f'{sub_dataset} loop done. Start selecting neighborhoods...\n')
+        model.eval()
+
+        timeseries_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+        )
+
+        anchor_reps = []
+        negative_reps = []
+
+        print('Loading representations of each anchor and its negative pair.')
+
+        for batch in tqdm(timeseries_loader):
+            anchor, _, negative_pair = batch
+            anchor = anchor.to(device).float().transpose(-2, -1)
+            negative_pair = negative_pair.to(device).float().transpose(-2, -1)
+            anchor_rep = model.forward(anchor).detach().cpu()
+            negative_rep = model.forward(negative_pair).detach().cpu()
+            anchor_reps.append(anchor_rep)
+            negative_reps.append(negative_rep)
         
-        epoch_loss /= len(train_loader)
-        logging.info(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+        anchor_reps = torch.cat(anchor_reps, dim=0).numpy()
+        negative_reps = torch.cat(negative_reps, dim=0).numpy()
+        
+        reps = np.concatenate([anchor_reps, negative_reps], axis=0)
 
-        if epoch == 0 or (epoch + 1) % model_save_interval == 0:
-            torch.save(
-                obj={
-                    'resnet': model.resnet.state_dict(),
-                    'contrastive_head': model.contrastive_head.state_dict(),
-                    'optim': optimizer.state_dict(),
-                },
-                f=os.path.join(
-                    log_dir, 'model_pretext', f'epoch_{epoch + 1}.pt'
-                    )
+        index_searcher = IndexFlatL2(reps.shape[1])
+        assert index_searcher.d == reps.shape[1],\
+        f'{index_searcher.d} != {reps.shape[1]}'
+        index_searcher.add(reps)
+
+        anchor_and_negative_pairs = np.concatenate(
+            [train_dataset.anchors, train_dataset.negative_pairs],
+            axis=0,
+        )
+
+        classification_data_dir = os.path.join(
+            'classification_dataset', dataset
             )
+        os.makedirs(os.path.join(
+            classification_data_dir, 'anchor_nn'
+            ), exist_ok=True)
+        os.makedirs(os.path.join(
+            classification_data_dir, 'anchor_fn'
+            ), exist_ok=True)
+        os.makedirs(os.path.join(
+            classification_data_dir, 'negative_nn'
+            ), exist_ok=True)
+        os.makedirs(os.path.join(
+            classification_data_dir, 'negative_fn'
+            ), exist_ok=True)
 
-    print('Pretext training done. Start selecting neighborhoods...\n')
-      
-    model.eval()
+        print(f'\nSelecting top-{num_neighbors} neighbors of the anchor...')
 
-    timeseries_loader = DataLoader(
-        dataset=train_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-    )
+        nearest_neighbors = []
+        furthest_neighbors = []
 
-    anchor_reps = []
-    negative_reps = []
-
-    print('Loading representations of each anchor and its negative pair.')
-
-    for batch in tqdm(timeseries_loader):
-        anchor, _, negative_pair = batch
-        anchor = anchor.to(device).float().transpose(-2, -1)
-        negative_pair = negative_pair.to(device).float().transpose(-2, -1)
-        anchor_rep = model.forward(anchor).detach().cpu()
-        negative_rep = model.forward(negative_pair).detach().cpu()
-        anchor_reps.append(anchor_rep)
-        negative_reps.append(negative_rep)
-    
-    anchor_reps = torch.cat(anchor_reps, dim=0).numpy()
-    negative_reps = torch.cat(negative_reps, dim=0).numpy()
-    
-    reps = np.concatenate([anchor_reps, negative_reps], axis=0)
-
-    index_searcher = IndexFlatL2(reps.shape[1])
-    assert index_searcher.d == reps.shape[1],\
-    f'{index_searcher.d} != {reps.shape[1]}'
-    index_searcher.add(reps)
-
-    anchor_and_negative_pairs = np.concatenate(
-        [train_dataset.anchors, train_dataset.negative_pairs],
-        axis=0,
-    )
-
-    classification_data_dir = f'classification_dataset/{dataset}'
-    
-    if not os.path.exists(classification_data_dir):
-        os.makedirs(classification_data_dir, exist_ok=True)
-
-    print(f'\nSelecting top-{num_neighbors} neighbors of the anchor...')
-
-    nearest_neighbors = []
-    furthest_neighbors = []
-
-    for anchor_rep in tqdm(anchor_reps):
-        anchor_query = anchor_rep.reshape(1, -1)
-        _, indices = index_searcher.search(anchor_query, reps.shape[0])
-        indices = indices.reshape(-1)
-        nearest_indices = indices[1:num_neighbors + 1]
-        furthest_indices = indices[-num_neighbors:]
-        nearest_neighbors.append(
-            anchor_and_negative_pairs[nearest_indices]
+        for anchor_rep in tqdm(anchor_reps):
+            anchor_query = anchor_rep.reshape(1, -1)
+            _, indices = index_searcher.search(anchor_query, reps.shape[0])
+            indices = indices.reshape(-1)
+            nearest_indices = indices[1:num_neighbors + 1]
+            furthest_indices = indices[-num_neighbors:]
+            nearest_neighbors.append(
+                anchor_and_negative_pairs[nearest_indices]
+            )
+            furthest_neighbors.append(
+                anchor_and_negative_pairs[furthest_indices]
+            )
+        
+        print('\nSaving nearest neighborhoods of the anchor...')
+        nearest_neighbors = np.array(nearest_neighbors)
+        np.save(
+            file=os.path.join(
+                classification_data_dir, 'anchor_nn', sub_dataset
+            ),
+            arr=nearest_neighbors,
         )
-        furthest_neighbors.append(
-            anchor_and_negative_pairs[furthest_indices]
+
+        print('Saving furthest neighborhoods of the anchor...')
+        furthest_neighbors = np.array(furthest_neighbors)
+        np.save(
+            file=os.path.join(
+                classification_data_dir, 'anchor_fn', sub_dataset
+            ),
+            arr=furthest_neighbors,
         )
-    
-    print('\nSaving nearest neighborhoods of the anchor...')
-    nearest_neighbors = np.array(nearest_neighbors)
-    np.save(
-        file=os.path.join(
-            classification_data_dir, 'anchor_nns.npy'
-        ),
-        arr=nearest_neighbors,
-    )
 
-    print('Saving furthest neighborhoods of the anchor...')
-    furthest_neighbors = np.array(furthest_neighbors)
-    np.save(
-        file=os.path.join(
-            classification_data_dir, 'anchor_fns.npy'
-        ),
-        arr=furthest_neighbors,
-    )
+        print(f'\nSelecting top-{num_neighbors} neighbors of the negative pair...')
 
-    print(f'\nSelecting top-{num_neighbors} neighbors of the negative pair...')
+        nearest_neighbors = []
+        furthest_neighbors = []
 
-    nearest_neighbors = []
-    furthest_neighbors = []
-
-    for negative_rep in tqdm(negative_reps):
-        negative_query = negative_rep.reshape(1, -1)
-        _, indices = index_searcher.search(negative_query, reps.shape[0])
-        indices = indices.reshape(-1)
-        nearest_indices = indices[1:num_neighbors + 1]
-        furthest_indices = indices[-num_neighbors:]
-        nearest_neighbors.append(
-            anchor_and_negative_pairs[nearest_indices]
+        for negative_rep in tqdm(negative_reps):
+            negative_query = negative_rep.reshape(1, -1)
+            _, indices = index_searcher.search(negative_query, reps.shape[0])
+            indices = indices.reshape(-1)
+            nearest_indices = indices[1:num_neighbors + 1]
+            furthest_indices = indices[-num_neighbors:]
+            nearest_neighbors.append(
+                anchor_and_negative_pairs[nearest_indices]
+            )
+            furthest_neighbors.append(
+                anchor_and_negative_pairs[furthest_indices]
+            )
+        
+        print('\nSaving nearest neighborhoods of the anchor...')
+        nearest_neighbors = np.array(nearest_neighbors)
+        np.save(
+            file=os.path.join(
+                classification_data_dir, 'negative_nn', sub_dataset
+            ),
+            arr=nearest_neighbors,
         )
-        furthest_neighbors.append(
-            anchor_and_negative_pairs[furthest_indices]
-        )
-    
-    print('\nSaving nearest neighborhoods of the anchor...')
-    nearest_neighbors = np.array(nearest_neighbors)
-    np.save(
-        file=os.path.join(
-            classification_data_dir, 'negative_nns.npy'
-        ),
-        arr=nearest_neighbors,
-    )
 
-    print('Saving furthest neighborhoods of the anchor...')
-    furthest_neighbors = np.array(furthest_neighbors)
-    np.save(
-        file=os.path.join(
-            classification_data_dir, 'negative_fns.npy'
-        ),
-        arr=furthest_neighbors,
-    )
+        print('Saving furthest neighborhoods of the anchor...')
+        furthest_neighbors = np.array(furthest_neighbors)
+        np.save(
+            file=os.path.join(
+                classification_data_dir, 'negative_fn', sub_dataset
+            ),
+            arr=furthest_neighbors,
+        )
 
     print('\nPretext stage done. Move on to the classification stage.')
     
@@ -328,185 +343,206 @@ def classification(
     than the probabilities such that the data is sent to another class; 
     abnormal otherwise.
     """
-    device = torch.device(f'cuda:{gpu_num}')
+    save_f1 = []
+    save_auc_pr = []
     
-    train_dataset = ClassificationDataset(
-        dataset=dataset,
-        window_size=window_size,
-        mode='train'
-    )
-    data_dim = train_dataset.data_dim
+    for sub_dataset in os.listdir(f'data/{dataset}/train'):
+        logging.info(f'Dataset {sub_dataset}')
+        device = torch.device(f'cuda:{gpu_num}')
+        
+        train_dataset = ClassificationDataset(
+            dataset=dataset,
+            sub_dataset=sub_dataset,
+            window_size=window_size,
+            mode='train'
+        )
+        data_dim = train_dataset.data_dim
 
-    resnet_ckpt = torch.load(os.path.join(
-        call_model_dir, 'model_pretext', 'epoch_30.pt'
-        ))
-    model = ClassificationModel(in_channels=data_dim)
-    model.resnet.load_state_dict(resnet_ckpt['resnet'])
-    model = model.to(device)
+        resnet_ckpt = torch.load(os.path.join(
+            call_model_dir, 'model_pretext', f'{sub_dataset.replace(
+                '.npy', ''
+                )}_epoch_30.pt'
+            ))
+        model = ClassificationModel(in_channels=data_dim)
+        model.resnet.load_state_dict(resnet_ckpt['resnet'])
+        model = model.to(device)
 
-    train_loader = DataLoader(
-        dataset=train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-    )
-    optimizer = optim.Adam(
-        params=model.parameters(),
-        lr=learning_rate,
-    )
-    criterion = classificationloss()
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+        )
+        optimizer = optim.Adam(
+            params=model.parameters(),
+            lr=learning_rate,
+        )
+        criterion = classificationloss()
 
-    model.train()
-    print('Classification training loop start...\n')
+        model.train()
+        print('Classification training loop start...\n')
 
-    for epoch in range(epochs):
-        print(f'Epoch {epoch + 1} start.')
-        epoch_loss = 0.0
-        epoch_consistency_loss = 0.0
-        epoch_inconsistency_loss = 0.0
-        epoch_entropy_loss = 0.0
+        for epoch in range(epochs):
+            print(f'Epoch {epoch + 1} start.')
+            epoch_loss = 0.0
+            epoch_consistency_loss = 0.0
+            epoch_inconsistency_loss = 0.0
+            epoch_entropy_loss = 0.0
 
-        for batch in tqdm(train_loader):
-            optimizer.zero_grad()
-            batch_loss = torch.zeros(1, device=device)
+            for batch in tqdm(train_loader):
+                optimizer.zero_grad()
+                batch_loss = torch.zeros(1, device=device)
 
-            window, nearest_neighbor, furthest_neighbor = batch
+                window, nearest_neighbor, furthest_neighbor = batch
 
-            window = window.to(device).float()
-            nearest_neighbor = nearest_neighbor.to(device).float()
-            furthest_neighbor = furthest_neighbor.to(device).float()
+                window = window.to(device).float()
+                nearest_neighbor = nearest_neighbor.to(device).float()
+                furthest_neighbor = furthest_neighbor.to(device).float()
 
-            window = window.transpose(-2, -1)
-            window_logit = model.forward(window)
+                window = window.transpose(-2, -1)
+                window_logit = model.forward(window)
 
-            entropy_loss = entropy(torch.mean(window_logit, 0))
-            batch_loss -= entropy_loss
-            epoch_entropy_loss += entropy_loss.item()
+                entropy_loss = entropy(torch.mean(window_logit, 0))
+                batch_loss -= entropy_loss
+                epoch_entropy_loss += entropy_loss.item()
 
-            batch_consistency_sum = torch.zeros(1, device=device)
-            batch_consistency = 0.0
-            batch_inconsistency = 0.0
+                batch_consistency_sum = torch.zeros(1, device=device)
+                batch_consistency = 0.0
+                batch_inconsistency = 0.0
 
-            for i in range(nearest_neighbor.shape[1]):
-                nearest = nearest_neighbor[:, i].transpose(-2, -1)
-                furthest = furthest_neighbor[:, i].transpose(-2, -1)
+                for i in range(nearest_neighbor.shape[1]):
+                    nearest = nearest_neighbor[:, i].transpose(-2, -1)
+                    furthest = furthest_neighbor[:, i].transpose(-2, -1)
 
-                nearest_logit = model.forward(nearest)
-                furthest_logit = model.forward(furthest)
+                    nearest_logit = model.forward(nearest)
+                    furthest_logit = model.forward(furthest)
 
-                consistency_sum, consistency, inconsistency \
-                = criterion(
-                    window_logit=window_logit,
-                    nearest_logit=nearest_logit,
-                    furthest_logit=furthest_logit,
-                )
+                    consistency_sum, consistency, inconsistency \
+                    = criterion(
+                        window_logit=window_logit,
+                        nearest_logit=nearest_logit,
+                        furthest_logit=furthest_logit,
+                    )
+                    
+                    batch_consistency_sum += consistency_sum
+                    batch_consistency += consistency
+                    batch_inconsistency += inconsistency
                 
-                batch_consistency_sum += consistency_sum
-                batch_consistency += consistency
-                batch_inconsistency += inconsistency
+                batch_loss += batch_consistency_sum
+
+                epoch_consistency_loss += batch_consistency
+                epoch_inconsistency_loss += batch_inconsistency
+
+                batch_loss.backward()
+                optimizer.step()
+                epoch_loss += batch_loss.item()
             
-            batch_loss += batch_consistency_sum
+            epoch_consistency_loss /= len(train_loader)
+            epoch_inconsistency_loss /= len(train_loader)
+            epoch_entropy_loss /= len(train_loader)
+            epoch_loss /= len(train_loader)
+            
+            logging.info(f'Epoch {epoch + 1} finished.')
+            logging.info(f'- Consistency loss: {epoch_consistency_loss:.4e}')
+            logging.info(f'- Inconsistency loss: {epoch_inconsistency_loss:.4e}')
+            logging.info(f'- Entropy loss: {epoch_entropy_loss:.4e}')
+            logging.info(f'- Total loss: {epoch_loss:.4e}\n')
 
-            epoch_consistency_loss += batch_consistency
-            epoch_inconsistency_loss += batch_inconsistency
 
-            batch_loss.backward()
-            optimizer.step()
-            epoch_loss += batch_loss.item()
+            if epoch == 0 or (epoch + 1) % model_save_interval == 0:
+                torch.save(
+                    obj={
+                        'model': model.state_dict(),
+                        'optim': optimizer.state_dict(),
+                    },
+                    f=os.path.join(
+                        log_dir, 'model_classification', f'{sub_dataset.replace(
+                            '.npy', ''
+                            )}_epoch_{epoch + 1}.pt'
+                        ),
+                    )
         
-        epoch_consistency_loss /= len(train_loader)
-        epoch_inconsistency_loss /= len(train_loader)
-        epoch_entropy_loss /= len(train_loader)
-        epoch_loss /= len(train_loader)
-        
-        logging.info(f'Epoch {epoch + 1} finished.')
-        logging.info(f'- Consistency loss: {epoch_consistency_loss:.4e}')
-        logging.info(f'- Inconsistency loss: {epoch_inconsistency_loss:.4e}')
-        logging.info(f'- Entropy loss: {epoch_entropy_loss:.4e}')
-        logging.info(f'- Total loss: {epoch_loss:.4e}\n')
+        print('Classification training done.')
 
+        model.eval()
+        print('\nStarting inference...')
 
-        if epoch == 0 or (epoch + 1) % model_save_interval == 0:
-            torch.save(
-                obj={
-                    'model': model.state_dict(),
-                    'optim': optimizer.state_dict(),
-                },
-                f=os.path.join(
-                    log_dir, 'model_classification', f'epoch_{epoch + 1}.pt'
-                    ),
-                )
-    
-    print('Classification training done.')
+        test_dataset = ClassificationDataset(
+            dataset='MSL', sub_dataset=sub_dataset, mode='test'
+            )
+        test_data = torch.tensor(
+            data=test_dataset.data,
+            dtype=torch.float32
+        )
+        test_data = test_data.unsqueeze(1).transpose(-2, -1).to(device)
+        labels = test_dataset.labels.reshape(-1)
 
-    model.eval()
-    print('\nStarting inference...')
+        model.eval()
 
-    test_dataset = ClassificationDataset(dataset='MSL', mode='test')
-    test_data = torch.tensor(
-        data=test_dataset.data,
-        dtype=torch.float32
-    )
-    test_data = test_data.unsqueeze(1).transpose(-2, -1).to(device)
-    labels = test_dataset.labels.reshape(-1)
+        logits = model(test_data)
+        logits = logits.detach().cpu().numpy()
 
-    model.eval()
+        classes = [0 for _ in range(10)]
 
-    logits = model(test_data)
-    logits = logits.detach().cpu().numpy()
+        for i in range(len(logits)):
+            logit = logits[i]
+            max_index = np.argmax(logit)
+            classes[max_index] += 1
 
-    classes = [0 for _ in range(10)]
+        major_class = classes.index(max(classes))
 
-    for i in range(len(logits)):
-        logit = logits[i]
-        max_index = np.argmax(logit)
-        classes[max_index] += 1
+        anomaly_labels = []
+        anomaly_scores = []
 
-    major_class = classes.index(max(classes))
+        for i in range(len(logits)):
+            logit = logits[i]
+            major_probability = logit[major_class]
+            
+            if np.argmax(logit) == major_class:
+                anomaly_labels.append(1)
+            else:
+                anomaly_labels.append(0)
+            
+            anomaly_scores.append(1 - major_probability)
 
-    anomaly_labels = []
-    anomaly_scores = []
+        anomaly_labels = np.array(anomaly_labels)
+        anomaly_scores = np.array(anomaly_scores)
 
-    for i in range(len(logits)):
-        logit = logits[i]
-        major_probability = logit[major_class]
-        
-        if np.argmax(logit) == major_class:
-            anomaly_labels.append(1)
-        else:
-            anomaly_labels.append(0)
-        
-        anomaly_scores.append(1 - major_probability)
+        precision, recall, thresholds = precision_recall_curve(
+        y_true=labels,
+        y_score=anomaly_scores,
+        )
 
-    anomaly_labels = np.array(anomaly_labels)
-    anomaly_scores = np.array(anomaly_scores)
+        auc_pr = auc(recall, precision)
 
-    precision, recall, thresholds = precision_recall_curve(
-    y_true=labels,
-    y_score=anomaly_scores,
-    )
+        best_threshold = 0
+        best_precision = 0
+        best_recall = 0
+        best_fl = 0
 
-    auc_pr = auc(recall, precision)
+        for i in range(len(thresholds)):
+            f1score = f1(precision[i], recall[i])
+            if f1score > best_fl:
+                best_fl = f1score
+                best_precision = precision[i]
+                best_recall = recall[i]
+                best_threshold = thresholds[i]
 
-    best_threshold = 0
-    best_precision = 0
-    best_recall = 0
-    best_fl = 0
+        print('\nResults')
+        logging.info(f'\n- Best F1 score: {round(best_fl, 4)}')
+        logging.info(f'- Best Precision: {round(best_precision, 4)}')
+        logging.info(f'- Best Recall: {round(best_recall, 4)}')
+        logging.info(f' -Best Threshold: {best_threshold:.4e}')
+        logging.info(f'\n- AUC-PR: {round(auc_pr, 4)}')
+        save_f1.append(best_fl)
+        save_auc_pr.append(auc_pr)
 
-    for i in range(len(thresholds)):
-        f1score = f1(precision[i], recall[i])
-        if f1score > best_fl:
-            best_fl = f1score
-            best_precision = precision[i]
-            best_recall = recall[i]
-            best_threshold = thresholds[i]
-
-    print('\nResults')
-    logging.info(f'\n- Best F1 score: {round(best_fl, 4)}')
-    logging.info(f'- Best Precision: {round(best_precision, 4)}')
-    logging.info(f'- Best Recall: {round(best_recall, 4)}')
-    logging.info(f' -Best Threshold: {best_threshold:.4e}')
-    logging.info(f'\n- AUC-PR: {round(auc_pr, 4)}')
-
+    logging.info('Trained all dataset.')
+    save_f1 = np.array(save_f1)
+    save_auc_pr = np.array(save_auc_pr)
+    logging.info(
+        f'Best F1 score | mean {save_f1.mean():.4f}, std {save_f1.std():.4f} ' \
+        f'AUC-PR | mean {save_auc_pr.mean():.4f}, std {save_auc_pr.std():.4f}'
+        )
     return 
 
 
@@ -540,7 +576,7 @@ if __name__ == '__main__':
     )
     args.add_argument(
         '--use-wandb',
-        type=bool, 
+        type=str2bool, 
         default=False,
         help="Control whether use wandb log or not. Default False."
     )
@@ -613,7 +649,7 @@ if __name__ == '__main__':
         assert config.classification_model_dir is not None
     
     log_time = datetime.now().strftime('%y%m%d_%H%M%S')
-    log_dir = os.path.join('logs', config.task + '_' + config.exp_name + f'_{log_time}')
+    log_dir = os.path.join('logs', f'{config.task}_{config.exp_name}_{log_time}')
     model_dir = os.path.join(log_dir, 'model_' + config.task)
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)

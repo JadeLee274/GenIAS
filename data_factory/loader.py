@@ -174,6 +174,7 @@ class PretextDataset(object):
 
     Parameters:
         dataset:     Name of dataset.
+        sub_dataset: If dataset has multiple subs, then each dataset name.
         window_size: Window size of data, positive pair, negative pair.
                      Default 200.
         mode:        Whether the dataset is for trainig or test. 
@@ -184,6 +185,7 @@ class PretextDataset(object):
     def __init__(
         self,
         dataset: str,
+        sub_dataset: str,
         window_size: int = 200,
         mode: str = 'train',
         use_genias: bool = False,
@@ -204,17 +206,16 @@ class PretextDataset(object):
         
         if dataset in ['MSL', 'SMAP', 'SMD']:
             if mode == 'train':
-                data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy'))
+                data = np.load(os.path.join(
+                    DATA_PATH, dataset, 'train', sub_dataset
+                    ))
             elif mode == 'test':
-                data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_test.npy')
-                )
-                labels = np.load(
-                    os.path.join(
-                        DATA_PATH, dataset, f'{dataset}_test_label.npy'
-                    )
-                )
+                data = np.load(os.path.join(
+                    DATA_PATH, dataset, 'test', sub_dataset
+                    ))
+                labels = np.load(os.path.join(
+                    DATA_PATH, dataset, 'test_label', sub_dataset
+                    ))
                 anomalies = data[labels == 1]
         
         elif dataset == 'SWaT':
@@ -231,7 +232,7 @@ class PretextDataset(object):
                 )
                 data.drop(columns=[' Timestamp'], inplace=True)
                 data = data.values
-                labels = data[:, -1]
+                labels = data[:, -1] + '.npy'
                 anomalies = data[labels == 1]
                 anomalies = anomalies[:, :-1]
                 data = data[:, :-1]
@@ -263,14 +264,22 @@ class PretextDataset(object):
 
         print('Saving negative pairs for classification stage...')
         classification_data_dir = os.path.join(
-            CLASSIFICATION_DATA_PATH, dataset
+            CLASSIFICATION_DATA_PATH, dataset, 
         )
         os.makedirs(classification_data_dir, exist_ok=True)
-
-        np.save(
+        if dataset in ['MSL', 'SMAP', 'SMD']:
+            os.makedirs(os.path.join(
+                classification_data_dir, 'negative_pairs'
+                ), exist_ok=True)
+            np.save(file=os.path.join(
+                    classification_data_dir, 'negative_pairs', 
+                    sub_dataset
+                    ), arr=self.negative_pairs)
+        elif dataset == 'SWaT':
+            np.save(
             file=os.path.join(classification_data_dir, 'negative_pairs.npy'),
             arr=self.negative_pairs,
-        )
+            )
 
     def get_positive_pairs(self) -> None:
         positive_pairs = []
@@ -398,6 +407,7 @@ class ClassificationDataset(object):
     def __init__(
         self,
         dataset: str,
+        sub_dataset: str,
         window_size: int = 200,
         mode: str = 'train',
     ) -> None:
@@ -411,14 +421,15 @@ class ClassificationDataset(object):
         if dataset in ['MSL', 'SMAP', 'SMD']:
             if mode == 'train':
                 data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy'))
+                    os.path.join(DATA_PATH, dataset, 'train', sub_dataset)
+                    )
             elif mode == 'test':
                 data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_test.npy')
-                )
+                    os.path.join(DATA_PATH, dataset, 'test', sub_dataset)
+                    )
                 labels = np.load(
                     os.path.join(
-                        DATA_PATH, dataset, f'{dataset}_test_label.npy'
+                        DATA_PATH, dataset, 'test_label', sub_dataset
                     )
                 )
                 anomalies = data[labels == 1]
@@ -450,13 +461,15 @@ class ClassificationDataset(object):
         self.std = std
 
         if mode == 'train':
-            classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
+            classification_data_dir = os.path.join(
+                CLASSIFICATION_DATA_PATH, dataset
+            )
 
             # Loads anchors and corresponding negative pairs
             anchors = convert_to_windows(data=data, window_size=window_size)
-            negative_pairs = np.load(
-                os.path.join(classification_data_dir, 'negative_pairs.npy')
-            )
+            negative_pairs = np.load(os.path.join(
+                    classification_data_dir, 'negative_pairs', sub_dataset
+                    ))
             # windows = []
             # for i in range(anchors.shape[0]):
             #     windows.append(anchors[i])
@@ -467,12 +480,12 @@ class ClassificationDataset(object):
             # Loads nearest neighbors
             anchor_nns = np.load(
                 os.path.join(
-                    classification_data_dir, 'anchor_nns.npy'
+                    classification_data_dir, 'anchor_nn', sub_dataset
                 )
             )
             negative_nns = np.load(
                 os.path.join(
-                    classification_data_dir, 'negative_nns.npy'
+                    classification_data_dir, 'negative_nn', sub_dataset
                 )
             )
             # nns = []
@@ -485,12 +498,12 @@ class ClassificationDataset(object):
             # Loads furthest neighbors
             anchor_fns = np.load(
                 os.path.join(
-                    classification_data_dir, 'anchor_fns.npy'
+                    classification_data_dir, 'anchor_fn', sub_dataset
                 )
             )
             negative_fns = np.load(
                 os.path.join(
-                    classification_data_dir, 'negative_fns.npy'
+                    classification_data_dir, 'anchor_nn', sub_dataset
                 )
             )
             # fns = []

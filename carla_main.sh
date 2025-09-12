@@ -4,4 +4,4 @@ python carla_main.py \
     --use-wandb False \
     --dataset MSL \
     --gpu-num 0 \
-    --classification-model-dir logs/pretext_debug_250911_200736 \
+    --classification-model-dir logs/pretext_debug_250912_193111 \
