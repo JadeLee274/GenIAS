@@ -21,6 +21,7 @@ __pycache__/
 save/
 temp/
 temp_checkpoints/
+temp_classification/
 temp_log/
 test_result/
 wandb/
