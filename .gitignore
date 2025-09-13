@@ -15,11 +15,12 @@ classification.py
 
 # Ignore directory
 data/
-log/
+logs/
 practice/
 __pycache__/
 save/
 temp/
+temp_checkpoints/
+temp_log/
 test_result/
 wandb/
-logs/
