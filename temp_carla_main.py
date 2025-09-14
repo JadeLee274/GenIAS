@@ -468,9 +468,9 @@ def classification(
     best_fl = 0
 
     for i in range(len(thresholds)):
-        f1score = f1(precision[i], recall[i])
-        if f1score > best_fl:
-            best_fl = f1score
+        f1_score = f1score(precision=precision[i], recall=recall[i])
+        if f1_score > best_fl:
+            best_fl = f1_score
             best_precision = precision[i]
             best_recall = recall[i]
             best_threshold = thresholds[i]

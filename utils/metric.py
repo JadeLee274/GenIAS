@@ -4,6 +4,20 @@ from utils.common_import import *
 ######################### Metrics for CARLA inference ######################### 
 
 
+def f1score(precision: float, recall: float) -> float:
+    """
+    Calculate F1 score for given precision and recall.
+
+    Parameters:
+        precision: Precision.
+        reacll:    Recall.
+
+    Returns:
+        F1 score.
+    """
+    return (2 * precision * recall) / (precision + recall)
+
+
 def f1(prediction: Vector, gt: Vector) -> Tuple[float, int, int, int]:
     """
     Calculates F1 score, number of true positives, number of false positives,
