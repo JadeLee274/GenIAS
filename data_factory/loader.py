@@ -201,11 +201,12 @@ class PretextDataset(object):
 
         data = None
         labels = None
-        
+
         if dataset in ['MSL', 'SMAP', 'SMD']:
             if mode == 'train':
                 data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy'))
+                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy')
+                )
             elif mode == 'test':
                 data = np.load(
                     os.path.join(DATA_PATH, dataset, f'{dataset}_test.npy')
@@ -258,7 +259,7 @@ class PretextDataset(object):
         elif dataset in ['SMAP', 'Yahoo']:
             patch_coef = 0.2
         
-        self.get_positive_pairs()
+        self.get_positive_pairs(patch_coef=patch_coef)
         self.get_negative_pairs(patch_coef=patch_coef)
 
         print('Saving negative pairs for classification stage...')
@@ -272,22 +273,75 @@ class PretextDataset(object):
             arr=self.negative_pairs,
         )
 
-    def get_positive_pairs(self) -> None:
-        positive_pairs = []
+    def get_positive_pairs(self, patch_coef: float) -> None:
+        if self.use_genias:
+            vae = VAE(
+                window_size=self.window_size,
+                data_dim=self.data_dim,
+                latent_dim = 100 if self.data_dim != 0 else 50,
+                depth=10,
+            )
 
-        for idx in range(self.anchors.shape[0]):
-            if idx > 10:
-                positive_pair_idx = np.random.randint(idx - 10, idx)
-                positive_pair = self.anchors[positive_pair_idx]
-            else:
-                positive_pair = self.anchors[idx]
-                positive_pair = noise_transformation(x=positive_pair)
+            ckpt = torch.load(
+                os.path.join(VAE_PATH, self.dataset, 'epoch_1000.pt')
+            )
+
+            vae.load_state_dict(ckpt['model'])
+
+            positive_pairs = np.empty_like(self.data)
+
+            for i in range(self.data.shape[0]//self.window_size + 1):
+                subdata = self.data[
+                    i * self.window_size: (i + 1) * self.window_size
+                ]
+
+                if subdata.shape[0] != self.window_size:
+                    subdata_temp = np.empty(
+                        shape=(self.window_size, self.data_dim)
+                    )
+                    subdata_temp[:subdata.shape[0]] = subdata
+                    subdata = subdata_temp
+                
+                subdata = torch.tensor(subdata, dtype=torch.float32)
+                subdata = subdata.unsqueeze(0)
+                positive_pair = vae.forward(subdata)[-2]
+                positive_pair = positive_pair.squeeze(0)
+                positive_pair = np.array(positive_pair.detach())
+
+                if subdata.shape[0] != self.window_size:
+                    positive_pair = positive_pair[:subdata.shape[0]]
+                
+                positive_pairs[
+                    i * self.window_size: (i + 1) * self.window_size
+                ] \
+                = positive_pair
+
+            positive_pairs = patch(
+                x=self.data,
+                x_tilde=positive_pairs,
+                tau=patch_coef
+            )
+
+            self.positive_pairs = convert_to_windows(positive_pairs)
             
-            positive_pairs.append(positive_pair)
-        
-        self.positive_pairs = np.array(positive_pairs)
-        
-        return
+            return
+
+        else:
+            positive_pairs = []
+
+            for idx in range(self.anchors.shape[0]):
+                if idx > 10:
+                    positive_pair_idx = np.random.randint(idx - 10, idx)
+                    positive_pair = self.anchors[positive_pair_idx]
+                else:
+                    positive_pair = self.anchors[idx]
+                    positive_pair = noise_transformation(x=positive_pair)
+                
+                positive_pairs.append(positive_pair)
+            
+            self.positive_pairs = np.array(positive_pairs)
+            
+            return
 
     def get_negative_pairs(self, patch_coef: float) -> None:
         if self.use_genias:

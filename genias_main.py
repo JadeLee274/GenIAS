@@ -512,7 +512,7 @@ if __name__ == '__main__':
             gpu_num=config.gpu_num,
             epochs=config.vae_epochs,
             retrain=config.retrain,
-            ckpt_epoch=config.retrain_start_epoch,
+            retrain_start_epoch=config.retrain_start_epoch,
             init_lr=config.init_lr,
             checkpoint_step=config.checkpoint_step,
         )

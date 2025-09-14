@@ -46,13 +46,13 @@ def train_vae(
     checkpoint_step: int = 100,
 ) -> None:
     train_data = GenIASDataset(
-        data_name=data,
+        dataset=data,
         subdata=subdata,
         window_size=window_size,
         mode='train',
         convert_nan='overwrite',
     )
-    data_dim = train_data.data_shape[-1]
+    data_dim = train_data.data_dim
 
     device = torch.device(f'cuda:{gpu_num}')
 
@@ -73,7 +73,7 @@ def train_vae(
 
     scheduler = sched.StepLR(optimizer=optimizer, step_size=10, gamma=0.99)
 
-    ckpt_dir = f'temp_checkpoints/{data}/{subdata}'
+    ckpt_dir = f'temp_checkpoints/vae/{data}/{subdata}'
     os.makedirs(ckpt_dir, exist_ok=True)
 
     log_dir = f'temp_log/{data}'
@@ -84,14 +84,7 @@ def train_vae(
     with open(log_path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(
-            [
-                'epoch',
-                'recon_loss',
-                'pert_loss',
-                'zero_pert_loss',
-                'kld_loss',
-                'total_loss'
-            ]
+            ['epoch', 'recon', 'pert', 'zero_pert', 'kld', 'total_loss']
         )
 
     start_epoch = 0
@@ -144,11 +137,11 @@ def train_vae(
             writer.writerow(
                 [
                     epoch+1,
-                    np.round(recon_loss, 4),
-                    np.round(pert_loss, 4),
-                    np.round(zero_pert_loss, 4),
-                    np.round(kld_loss, 4),
-                    np.round(train_loss, 4),
+                    round(recon_loss, 4),
+                    round(pert_loss, 4),
+                    round(zero_pert_loss, 4),
+                    round(kld_loss, 4),
+                    round(train_loss, 4),
                 ]
             )
     

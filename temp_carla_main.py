@@ -11,7 +11,7 @@ from utils.common_import import *
 from data_factory.temp_loader import *
 from carla.model import *
 from utils.loss import pretextloss, classificationloss, entropy
-from utils.metric import f1
+from utils.metric import *
 from utils.fix_seed import fix_seed_all
 
 
@@ -57,25 +57,24 @@ def cosine_schedule(
 
 
 def pretext(
-    data_type: str,
-    data_name: str,
-    mode: str = 'train',
-    use_genias: bool = False,
+    dataset: str,
+    subdata: str,
+    use_genias: bool = True,
     epochs: int = 30,
     batch_size: int = 50,
     gpu_num: int = 0,
     model_save_interval: int = 5,
     num_neighbors: int = 2,
 ) -> None:
-    assert data_type in ['MSL_SEPARATED', 'SMAP_SEPARATED'], \
+    assert dataset in ['MSL_SEPARATED', 'SMAP_SEPARATED'], \
     "dataset must be one of 'MSL_SEPARATED', 'SMAP_SEPARATED'"
 
-    print(f'CARLA on {data_type} start.\n')
+    print(f'Pretext on {dataset} {subdata} start.\n')
 
     train_dataset = PretextDataset(
-        data_type=data_type,
-        data_name=data_name,
-        mode=mode,
+        dataset=dataset,
+        subdata=subdata,
+        use_genias=use_genias,
     )
     
     model = PretextModel(in_channels=train_dataset.data_dim)
@@ -90,14 +89,16 @@ def pretext(
     )
     optimizer = optim.Adam(model.parameters())
 
-    save_dir = os.path.join(f'temp/model_save/{data_type}/pretext/{data_name}')
+    if use_genias:
+        save_dir = f'temp_checkpoints/carla/use_genias/{dataset}/pretext/{subdata}'
+    else:
+        save_dir = f'temp_checkpoints/carla/without_genias/{dataset}/pretext/{subdata}'
+
     os.makedirs(save_dir, exist_ok=True)
 
     model.train()
-    print(f'Pretext on {data_name} start...\n')
 
     for epoch in range(epochs):
-        print(f'Epoch {epoch + 1}')
         cosine_schedule(
             optimizer=optimizer,
             current_epoch=epoch,
@@ -130,7 +131,7 @@ def pretext(
             epoch_loss += prev_loss
         
         epoch_loss /= len(train_loader)
-        print(f'- Train loss: {epoch_loss:.4e}\n')
+        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
@@ -142,7 +143,7 @@ def pretext(
                 f=os.path.join(save_dir, f'epoch_{epoch + 1}.pt'),
             )
         
-    print(f'Pretext training done. Start selecting neighbors of {data_name}\n')
+    print(f'\nPretext training done. Start selecting neighbors...\n')
 
     model.eval()
 
@@ -182,9 +183,11 @@ def pretext(
         axis=0,
     )
 
-    classification_data_dir = os.path.join(
-        CLASSIFICATION_PATH, data_type, data_name
-    )
+    if use_genias:
+        classification_data_dir = f'temp_classification/use_genias/{dataset}/{subdata}'
+    else:
+        classification_data_dir = f'temp_classification/without_genias/{dataset}/{subdata}'
+   
     os.makedirs(classification_data_dir, exist_ok=True)
 
     print(f'\nSelecting top-{num_neighbors} neighbors of the anchor...')
@@ -208,7 +211,7 @@ def pretext(
         )
         anchor_idx += 1
     
-    print('\nSaving nearest neighborhoods of the anchor...')
+    print('Saving neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
         file=os.path.join(
@@ -216,8 +219,6 @@ def pretext(
         ),
         arr=nearest_neighbors,
     )
-
-    print('Saving furthest neighborhoods of the anchor...')
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
         file=os.path.join(
@@ -247,7 +248,7 @@ def pretext(
         )
         negative_idx += 1
     
-    print('\nSaving nearest neighborhoods of the anchor...')
+    print('Saving neighborhoods of the negative pair...')
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
         file=os.path.join(
@@ -255,8 +256,6 @@ def pretext(
         ),
         arr=nearest_neighbors,
     )
-
-    print('Saving furthest neighborhoods of the anchor...')
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
         file=os.path.join(
@@ -271,27 +270,34 @@ def pretext(
 
 
 def classification(
-    data_type: str,
-    data_name: str,
+    dataset: str,
+    subdata: str,
+    use_genias: bool = False,
     gpu_num: int = 0,
     epochs: int = 100,
     batch_size: int = 50,
     learning_rate: float = 1e-2,
     model_save_interval: int = 5,
-) -> Tuple[float, float]:
+) -> Tuple[float, int, int, int, float]:
+    print(f'Classification on {dataset} {subdata} start...')
     device = torch.device(f'cuda:{gpu_num}')
 
     train_dataset = ClassificationDataset(
-        data_type=data_type,
-        data_name=data_name,
-        mode='train'
+        dataset=dataset,
+        subdata=subdata,
+        mode='train',
+        use_genias=use_genias
     )
     data_dim = train_dataset.data_dim
     model = ClassificationModel(in_channels=data_dim)
-    ckpt_dir = os.path.join(f'temp/model_save/{data_type}/pretext/{data_name}')
-    ckpt = torch.load(
-        os.path.join(ckpt_dir, 'epoch_30.pt')
-    )
+
+    if use_genias:
+        ckpt_dir = f'temp_checkpoints/carla/use_genias/{dataset}/pretext/{subdata}'
+        ckpt = torch.load(os.path.join(ckpt_dir, 'epoch_30.pt'))
+    else:
+        ckpt_dir = f'temp_checkpoints/carla/without_genias/{dataset}/pretext/{subdata}'
+        ckpt = torch.load(os.path.join(ckpt_dir, 'epoch_30.pt'))
+
     model.resnet.load_state_dict(ckpt['resnet'])
     model = model.to(device)
 
@@ -306,14 +312,27 @@ def classification(
     )
     criterion = classificationloss()
 
-    save_dir = f'temp/model_save/{data_type}/classification/{data_name}'
-    os.makedirs(save_dir, exist_ok=True)
+    if use_genias:
+        save_dir = f'temp_checkpoints/carla/use_genias/{dataset}/classification/{subdata}'
+        log_dir = f'temp_log/carla/use_genias/{dataset}'
+    else:
+        save_dir = f'temp_checkpoints/carla/without_genias/{dataset}/classification/{subdata}'
+        log_dir = f'temp_log/carla/without_genias/{dataset}'
 
-    print('Classification training loop start...\n')
+    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_path = os.path.join(log_dir, f'{subdata}_classification.csv')
+    
+    with open(log_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['epoch','consistenty','inconsistency','entropy','total'])
+
+    print(f'Classification training loop start...\n')
     model.train()
 
     for epoch in range(epochs):
-        print(f'Epoch {epoch + 1} start.')
+        print(f'Epoch {epoch + 1}')
         epoch_loss = 0.0
         epoch_consistency_loss = 0.0
         epoch_inconsistency_loss = 0.0
@@ -377,6 +396,16 @@ def classification(
         print(f'- Entropy loss: {epoch_entropy_loss:.4e}')
         print(f'- Total loss: {epoch_loss:.4e}\n')
 
+        with open(log_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                    epoch+1,
+                    round(epoch_consistency_loss, 4),
+                    round(epoch_inconsistency_loss, 4),
+                    round(epoch_entropy_loss, 4),
+                    round(epoch_loss, 4)
+                ]
+            )
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
@@ -390,12 +419,13 @@ def classification(
     print('Classification training done.')
 
     model.eval()
-    print('\nStarting inference...')
+    print(f'\nStarting inference on {dataset} {subdata}...')
 
     test_dataset = ClassificationDataset(
-        data_type=data_type,
-        data_name=data_name,
-        mode='test'
+        dataset=dataset,
+        subdata=subdata,
+        mode='test',
+        use_genias=use_genias,
     )
     test_data = torch.tensor(
         data=test_dataset.data,
@@ -416,26 +446,18 @@ def classification(
 
     major_class = classes.index(max(classes))
 
-    anomaly_labels = []
     anomaly_scores = []
 
     for i in range(len(logits)):
         logit = logits[i]
         major_probability = logit[major_class]
-        
-        if np.argmax(logit) == major_class:
-            anomaly_labels.append(1)
-        else:
-            anomaly_labels.append(0)
-        
         anomaly_scores.append(1 - major_probability)
 
-    anomaly_labels = np.array(anomaly_labels)
     anomaly_scores = np.array(anomaly_scores)
 
     precision, recall, thresholds = precision_recall_curve(
-    y_true=labels,
-    y_score=anomaly_scores,
+        y_true=labels,
+        y_score=anomaly_scores,
     )
 
     auc_pr = auc(recall, precision)
@@ -455,56 +477,146 @@ def classification(
 
     print('\nResults')
 
-    print(f'\n- Best F1 score: {round(best_fl, 4)}')
+    print(f'- Best F1 score: {round(best_fl, 4)}')
     print(f'- Best Precision: {round(best_precision, 4)}')
     print(f'- Best Recall: {round(best_recall, 4)}')
-    print(f' -Best Threshold: {best_threshold:.4e}')
-    print(f'\n- AUC-PR: {round(auc_pr, 4)}')
+    print(f'- Best Threshold: {round(best_threshold, 4)}')
+    print(f'- AUC-PR: {round(auc_pr, 4)}')
 
-    return best_fl, auc_pr
+    with open(log_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([])
+        writer.writerow(
+            ['Best F1', 'Best Precision', 'Best Recall', 'Best Threshold', 'AUC-PR'],
+        )
+        writer.writerow(
+            [
+                round(best_fl, 4),
+                round(best_precision, 4),
+                round(best_recall, 4),
+                round(best_threshold, 4),
+                round(auc_pr, 4)
+            ]
+        )
+    best_anomaly_prediction = np.where(anomaly_scores > best_threshold, 1, 0)
+    best_f1, best_tp, best_fp, best_fn = f1(
+        prediction=best_anomaly_prediction,
+        gt=labels
+    )
+
+    return best_f1, best_tp, best_fp, best_fn, auc_pr
+
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
     args.add_argument(
-        '--data-type',
+        '--dataset',
         type=str,
-        help="Dataset. Either 'MSL_SEPARATED' or 'SMAP_SEPARATED'"
+        help="Dataset. Either 'MSL_SEPARATED' or 'SMAP_SEPARATED'",
+    )
+    args.add_argument(
+        '--use-genias',
+        type=str2bool,
+        help='Whether to use genias or not.'
+    )
+    args.add_argument(
+        '--gpu-num',
+        type=int,
+        default=0,
+        help="gpu number. Default 0.",
     )
     args.add_argument(
         '-seed',
         type=int,
         default=42,
-        help='Fixed seed. Default 42.'
+        help='Fixed seed. Default 42.',
     )
     config = args.parse_args()
 
-    assert config.data_type in ['MSL_SEPARATED', 'SMAP_SEPARATED'], \
-    "data-type must be either 'MSL_SEPARATED' or 'SMAP_SEPARATED'"
-
     fix_seed_all(config.seed)
 
+    assert config.dataset in ['MSL_SEPARATED', 'SMAP_SEPARATED'], \
+    "data-type must be either 'MSL_SEPARATED' or 'SMAP_SEPARATED'"
     data_list = os.listdir('/data/seungmin/MSL_SEPARATED/train')
     data_list = sorted(data_list)
     data_list = [data.replace('_train.npy', '') for data in data_list]
-    f1_list = []
+
+    if config.use_genias:
+        log_dir = f'temp_log/carla/use_genias/{config.dataset}/results.csv'
+    else:
+        log_dir = f'temp_log/carla/without_genias/{config.dataset}/results.csv'
+    
+    with open(log_dir, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([f'Inference result of {config.dataset}'])
+        writer.writerow([])
+        writer.writerow(['subdata', 'Best F1', 'AUC-PR'])
+
+    best_f1_list = []
+    best_tp_list = []
+    best_fp_list = []
+    best_fn_list = []
     auc_pr_list = []
 
-    for data_name in data_list:
-        pretext(data_type=config.data_type, data_name=data_name)
-        best_f1, auc_pr = classification(
-            data_type=config.data_type,
-            data_name=data_name
+    for subdata in data_list:
+        pretext(
+            dataset=config.dataset,
+            subdata=subdata,
+            use_genias=config.use_genias,
         )
-        f1_list.append(best_f1)
+        best_f1, best_tp, best_fp, best_fn, auc_pr = classification(
+            dataset=config.dataset,
+            subdata=subdata,
+            use_genias=config.use_genias
+        )
+        best_f1_list.append(best_f1)
+        best_tp_list.append(best_tp)
+        best_fp_list.append(best_fp)
+        best_fn_list.append(best_fn)
         auc_pr_list.append(auc_pr)
+
+        with open(log_dir, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([subdata, round(best_f1, 4), round(auc_pr, 4)])
     
-    f1_list = np.array(f1_list)
+    best_f1_list = np.array(best_f1_list)
     auc_pr_list = np.array(auc_pr_list)
 
-    f1_best = np.max(f1_list)
+    f1_score_best = np.max(best_f1_list)
+    f1_micro = mirco_f1(
+        tp_list=best_tp_list,
+        fp_list=best_fp_list,
+        fn_list=best_fn_list
+    )
+    f1_macro = macro_f1(f1_list=best_f1_list)
+    
     auc_pr_mean = np.mean(auc_pr_list)
     auc_pr_std = np.std(auc_pr_list)
 
-    print(f'Best F1: {f1_best:.4e}')
-    print(f'AUC-PR mean: {auc_pr_mean:.4e}')
-    print(f'AUC-PR std: {auc_pr_std:.4e}')
+    print(f'Best F1: {round(f1_score_best, 4)}')
+    print(f'Micro F1: {round(f1_micro, 4)}')
+    print(f'Macro F1: {round(f1_macro, 4)}')
+    print(f'AUC-PR mean: {round(auc_pr_mean, 4)}')
+    print(f'AUC-PR std: {round(auc_pr_std, 4)}')
+
+    with open(log_dir, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([])
+        writer.writerow(
+            [
+                'Best F1',
+                'Micro F1',
+                'Macro F1',
+                'AUC-PR mean',
+                'AUC-PR std'
+            ]
+        )
+        writer.writerow(
+            [
+                round(f1_score_best, 4),
+                round(f1_micro, 4),
+                round(f1_macro, 4),
+                round(auc_pr_mean, 4),
+                round(auc_pr_std, 4),
+            ]
+        )
