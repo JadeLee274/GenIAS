@@ -80,9 +80,9 @@ def zero_pert_loss(x: Tensor, x_tilde: Tensor) -> Tensor:
 
     for i in torch.unique(ind[0]):
         sub_count = (ind[0] == i).sum().item()
-        sub_loss = mseloss(
-            x[i, :, ind[1][count:count+sub_count]],
-            x_tilde[i, :, ind[1][count:count+sub_count]]
+        sub_loss = mse_loss(
+            x[i:i+1, :, ind[1][count:count+sub_count]],
+            x_tilde[i:i+1, :, ind[1][count:count+sub_count]]
         )
         loss += (sub_loss + 1) ** -1
         count += sub_count
