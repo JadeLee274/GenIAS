@@ -454,6 +454,7 @@ def classification(
         anomaly_scores.append(1 - major_probability)
 
     anomaly_scores = np.array(anomaly_scores)
+    anomaly_scores = anomaly_scores.reshape(-1)
 
     precision, recall, thresholds = precision_recall_curve(
         y_true=labels,
@@ -498,11 +499,18 @@ def classification(
                 round(auc_pr, 4)
             ]
         )
-    best_anomaly_prediction = np.where(anomaly_scores > best_threshold, 1, 0)
-    best_f1, best_tp, best_fp, best_fn = f1(
+    best_anomaly_prediction = np.where(anomaly_scores >= best_threshold, 1, 0)
+    
+    best_f1, best_tp, best_fp, best_fn = f1_stat(
         prediction=best_anomaly_prediction,
         gt=labels
     )
+
+    with open(log_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([])
+        writer.writerow(['Best TP', 'Best FP', 'Best FN'])
+        writer.writerow([best_tp, best_fp, best_fn])
 
     return best_f1, best_tp, best_fp, best_fn, auc_pr
 
@@ -563,11 +571,13 @@ if __name__ == "__main__":
             dataset=config.dataset,
             subdata=subdata,
             use_genias=config.use_genias,
+            gpu_num=config.gpu_num,
         )
         best_f1, best_tp, best_fp, best_fn, auc_pr = classification(
             dataset=config.dataset,
             subdata=subdata,
-            use_genias=config.use_genias
+            use_genias=config.use_genias,
+            gpu_num=config.gpu_num
         )
         best_f1_list.append(best_f1)
         best_tp_list.append(best_tp)
