@@ -1,16 +1,18 @@
-import argparse, logging
+import csv
+import argparse
+import logging
 from math import cos, pi
-from tqdm import tqdm
-from faiss import IndexFlatL2
-from torch.nn import Softmax
-from sklearn.metrics import f1_score, roc_auc_score, \
-                            precision_recall_curve, auc
-from data_factory.loader import PretextDataset, ClassificationDataset
 from torch.utils.data import DataLoader
-from datetime import datetime
-import torch.optim as optim
-from carla.model import PretextModel, ClassificationModel
-from utils import *
+import torch.optim as optim 
+from faiss import IndexFlatL2
+from sklearn.metrics import precision_recall_curve, auc
+from utils.common_import import *
+from data_factory.temp_loader import *
+from carla.model import *
+from utils.loss import pretextloss, classificationloss, entropy
+from utils.metric import *
+from utils.fix_seed import fix_seed_all
+
 
 def str2bool(v: str) -> bool:
     """
@@ -55,99 +57,70 @@ def cosine_schedule(
 
 def pretext(
     dataset: str,
-    log_dir: str,
-    window_size: int = 200,
+    subdata: str,
+    use_genias: bool = True,
     epochs: int = 30,
     batch_size: int = 50,
     gpu_num: int = 0,
-    learning_rate: float = 1e-3,
     model_save_interval: int = 5,
-    use_genias: bool = False,
     num_neighbors: int = 2,
 ) -> None:
-    """
-    Training code for CARLA pretext stage.
+    assert dataset in ['MSL_SEPARATED', 'SMAP_SEPARATED'], \
+    "dataset must be one of 'MSL_SEPARATED', 'SMAP_SEPARATED'"
 
-    Parameters:
-        dataset:             Name of the training dataset.
-        log_dir:             Log directory.
-        window_size:         Window size. Default 200.
-        batch_size:          Batch size. Default 50.
-        gpu_num:             The model is trained in this GPU. Default 0.
-        epochs:              Training epoch: Default 30.
-        learning_rate:       Initial learning rate. Default 1e-3.
-        model_save_interval: The ResNet is saved once in this epoch. 
-                             Default 5.
-        use_genias:          Whether or not to use GenIAS for creating 
-                             negative pair. Default True.
-        num_neighbors:       Choose this number of nearese/furthers 
-                             neighborhood after the training loop.
-                             Default 5.
+    print(f'Pretext on {dataset} {subdata} start.\n')
 
-    Uses Resnet model and mlp head to map anchor, positive pair, and negative
-    pair to the representation space (with dimension 128, in this case).
-
-    While training, the pretext loss is optimized so that the distance between
-    the anchor and the positive pair get smaller, while that of
-    the anchor and the negative pair get larger, in the representation space.
-
-    The model is saved once in a model_save_interval epochs, in order to be
-    used for the self-supervised stage of CARLA.
-    """
     train_dataset = PretextDataset(
         dataset=dataset,
-        window_size=window_size,
-        mode='train',
+        subdata=subdata,
         use_genias=use_genias,
     )
     
-    model = PretextModel(
-        in_channels=train_dataset.data_dim,
-        mid_channels=4,
-    )
-    
+    model = PretextModel(in_channels=train_dataset.data_dim)
     device = torch.device(f'cuda:{gpu_num}')
-
     model = model.to(device)
-    criterion = pretextloss()
+    cri = pretextloss()
 
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
         shuffle=True,
     )
+    optimizer = optim.Adam(model.parameters())
 
-    optimizer = optim.Adam(
-        params=model.parameters(),
-        lr=learning_rate,
-    )
+    if use_genias:
+        save_dir = f'temp_checkpoints/carla/use_genias/{dataset}/pretext/{subdata}'
+    else:
+        save_dir = f'temp_checkpoints/carla/without_genias/{dataset}/pretext/{subdata}'
+
+    os.makedirs(save_dir, exist_ok=True)
 
     model.train()
-    logging.info('Pretext training loop start...\n')
 
     for epoch in range(epochs):
-        print(f'Epoch {epoch + 1} start.')
-
-        cosine_schedule(optimizer=optimizer, current_epoch=epoch)
+        cosine_schedule(
+            optimizer=optimizer,
+            current_epoch=epoch,
+            total_epochs=epochs
+        )
         epoch_loss = 0.0
         prev_loss = None
 
-        for batch in tqdm(train_loader):
+        for batch in train_loader:
             optimizer.zero_grad()
-            anchor, positive_pair, negative_pair = batch
-            B, W, F = anchor.shape
+            
+            anchor, positive, negative = batch
             anchor = anchor.to(device)
-            positive_pair = positive_pair.to(device)
-            negative_pair = negative_pair.to(device)
-
+            positive = positive.to(device)
+            negative = negative.to(device)
+            
+            B, W, F = anchor.shape
             triplets = torch.cat(
-                tensors=[anchor, positive_pair, negative_pair],
+                tensors=[anchor, positive, negative],
                 dim=0
-            ).float()
-
-            triplets = triplets.view(3 * B, F, W)
-            representations = model(triplets)
-            loss = criterion(
+            ).float().view(3*B, F, W)
+            representations = model.forward(triplets)
+            loss = cri(
                 representations=representations,
                 current_loss=prev_loss,
             )
@@ -157,7 +130,7 @@ def pretext(
             epoch_loss += prev_loss
         
         epoch_loss /= len(train_loader)
-        logging.info(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
@@ -166,13 +139,11 @@ def pretext(
                     'contrastive_head': model.contrastive_head.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(
-                    log_dir, 'model_pretext', f'epoch_{epoch + 1}.pt'
-                    )
+                f=os.path.join(save_dir, f'epoch_{epoch + 1}.pt'),
             )
+        
+    print(f'\nPretext training done. Start selecting neighbors...\n')
 
-    print('Pretext training done. Start selecting neighborhoods...\n')
-      
     model.eval()
 
     timeseries_loader = DataLoader(
@@ -183,10 +154,10 @@ def pretext(
 
     anchor_reps = []
     negative_reps = []
-
+        
     print('Loading representations of each anchor and its negative pair.')
 
-    for batch in tqdm(timeseries_loader):
+    for batch in timeseries_loader:
         anchor, _, negative_pair = batch
         anchor = anchor.to(device).float().transpose(-2, -1)
         negative_pair = negative_pair.to(device).float().transpose(-2, -1)
@@ -211,10 +182,12 @@ def pretext(
         axis=0,
     )
 
-    classification_data_dir = f'classification_dataset/{dataset}'
-    
-    if not os.path.exists(classification_data_dir):
-        os.makedirs(classification_data_dir, exist_ok=True)
+    if use_genias:
+        classification_data_dir = f'temp_classification/use_genias/{dataset}/{subdata}'
+    else:
+        classification_data_dir = f'temp_classification/without_genias/{dataset}/{subdata}'
+   
+    os.makedirs(classification_data_dir, exist_ok=True)
 
     print(f'\nSelecting top-{num_neighbors} neighbors of the anchor...')
 
@@ -222,7 +195,7 @@ def pretext(
     furthest_neighbors = []
 
     anchor_idx = 0
-    for anchor_rep in tqdm(anchor_reps):
+    for anchor_rep in anchor_reps:
         anchor_query = anchor_rep.reshape(1, -1)
         _, indices = index_searcher.search(anchor_query, reps.shape[0])
         indices = indices.reshape(-1)
@@ -237,7 +210,7 @@ def pretext(
         )
         anchor_idx += 1
     
-    print('\nSaving nearest neighborhoods of the anchor...')
+    print('Saving neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
         file=os.path.join(
@@ -245,8 +218,6 @@ def pretext(
         ),
         arr=nearest_neighbors,
     )
-
-    print('Saving furthest neighborhoods of the anchor...')
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
         file=os.path.join(
@@ -261,7 +232,7 @@ def pretext(
     furthest_neighbors = []
 
     negative_idx = 0
-    for negative_rep in tqdm(negative_reps):
+    for negative_rep in negative_reps:
         negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
@@ -276,7 +247,7 @@ def pretext(
         )
         negative_idx += 1
     
-    print('\nSaving nearest neighborhoods of the anchor...')
+    print('Saving neighborhoods of the negative pair...')
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
         file=os.path.join(
@@ -284,8 +255,6 @@ def pretext(
         ),
         arr=nearest_neighbors,
     )
-
-    print('Saving furthest neighborhoods of the anchor...')
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
         file=os.path.join(
@@ -294,61 +263,41 @@ def pretext(
         arr=furthest_neighbors,
     )
 
-    print('\nPretext stage done. Move on to the classification stage.')
-    
+    print('\nPretext stage done. Moving on to classification stage.\n')
+
     return
 
 
 def classification(
     dataset: str,
-    call_model_dir: str,
-    window_size: int = 200,
-    batch_size: int = 100,
+    subdata: str,
+    use_genias: bool = False,
     gpu_num: int = 0,
     epochs: int = 100,
+    batch_size: int = 50,
     learning_rate: float = 1e-2,
     model_save_interval: int = 5,
-) -> None:
-    """
-    Training code for CARLA slef-supervised classification stage.
-
-    Parameters:
-        dataset:             Name of the dataset.
-        model_dir:           The direction for calling the pretext model.
-        call_model_dir:      The path where the pretext model is saved. 
-        window_size:         Window size. Default 200.
-        batch_size:          Batch size. Default 100.
-        gpu_num:             The model is trained in this GPU. Default 0.
-        epochs:              Training epochs. Default 100.
-        learning_rate:       The initial learning rate. Default 1e-4.
-        model_save_interval: The model is saved once in this epoch. Default 5.
-
-    Uses the pre-trained ResNet model and classification head to map the
-    window, nearest neighbors, and furthest neighbors to the C-dimensional
-    space, where C is the number of classes that the classification model
-    wants to classify data.
-
-    If trained well, the classification model sends the majority of normal data
-    to the specific class, namely C_m. In the inference stage, the input from
-    the test set is fed to the classification model, and considered normal
-    if the probability such that the data is sent to C_m - th class is larger
-    than the probabilities such that the data is sent to another class; 
-    abnormal otherwise.
-    """
+) -> Tuple[float, int, int, int, float]:
+    print(f'Classification on {dataset} {subdata} start...')
     device = torch.device(f'cuda:{gpu_num}')
-    
+
     train_dataset = ClassificationDataset(
         dataset=dataset,
-        window_size=window_size,
-        mode='train'
+        subdata=subdata,
+        mode='train',
+        use_genias=use_genias
     )
     data_dim = train_dataset.data_dim
-
-    resnet_ckpt = torch.load(os.path.join(
-        call_model_dir, 'model_pretext', 'epoch_30.pt'
-        ))
     model = ClassificationModel(in_channels=data_dim)
-    model.resnet.load_state_dict(resnet_ckpt['resnet'])
+
+    if use_genias:
+        ckpt_dir = f'temp_checkpoints/carla/use_genias/{dataset}/pretext/{subdata}'
+        ckpt = torch.load(os.path.join(ckpt_dir, 'epoch_30.pt'))
+    else:
+        ckpt_dir = f'temp_checkpoints/carla/without_genias/{dataset}/pretext/{subdata}'
+        ckpt = torch.load(os.path.join(ckpt_dir, 'epoch_30.pt'))
+
+    model.resnet.load_state_dict(ckpt['resnet'])
     model = model.to(device)
 
     train_loader = DataLoader(
@@ -362,17 +311,33 @@ def classification(
     )
     criterion = classificationloss()
 
+    if use_genias:
+        save_dir = f'temp_checkpoints/carla/use_genias/{dataset}/classification/{subdata}'
+        log_dir = f'temp_log/carla/use_genias/{dataset}'
+    else:
+        save_dir = f'temp_checkpoints/carla/without_genias/{dataset}/classification/{subdata}'
+        log_dir = f'temp_log/carla/without_genias/{dataset}'
+
+    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+
+    log_path = os.path.join(log_dir, f'{subdata}_classification.csv')
+    
+    with open(log_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['epoch','consistenty','inconsistency','entropy','total'])
+
+    print(f'Classification training loop start...\n')
     model.train()
-    print('Classification training loop start...\n')
 
     for epoch in range(epochs):
-        print(f'Epoch {epoch + 1} start.')
+        print(f'Epoch {epoch + 1}')
         epoch_loss = 0.0
         epoch_consistency_loss = 0.0
         epoch_inconsistency_loss = 0.0
         epoch_entropy_loss = 0.0
 
-        for batch in tqdm(train_loader):
+        for batch in train_loader:
             optimizer.zero_grad()
             batch_loss = torch.zeros(1, device=device)
 
@@ -425,12 +390,21 @@ def classification(
         epoch_entropy_loss /= len(train_loader)
         epoch_loss /= len(train_loader)
         
-        logging.info(f'Epoch {epoch + 1} finished.')
-        logging.info(f'- Consistency loss: {epoch_consistency_loss:.4e}')
-        logging.info(f'- Inconsistency loss: {epoch_inconsistency_loss:.4e}')
-        logging.info(f'- Entropy loss: {epoch_entropy_loss:.4e}')
-        logging.info(f'- Total loss: {epoch_loss:.4e}\n')
+        print(f'- Consistency loss: {epoch_consistency_loss:.4e}')
+        print(f'- Inconsistency loss: {epoch_inconsistency_loss:.4e}')
+        print(f'- Entropy loss: {epoch_entropy_loss:.4e}')
+        print(f'- Total loss: {epoch_loss:.4e}\n')
 
+        with open(log_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                    epoch+1,
+                    round(epoch_consistency_loss, 4),
+                    round(epoch_inconsistency_loss, 4),
+                    round(epoch_entropy_loss, 4),
+                    round(epoch_loss, 4)
+                ]
+            )
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
@@ -438,28 +412,29 @@ def classification(
                     'model': model.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(
-                    log_dir, 'model_classification', f'epoch_{epoch + 1}.pt'
-                    ),
-                )
+                f=os.path.join(save_dir, f'epoch_{epoch + 1}.pt'),
+            )
     
     print('Classification training done.')
 
     model.eval()
-    print('\nStarting inference...')
+    print(f'\nStarting inference on {dataset} {subdata}...')
 
-    test_dataset = ClassificationDataset(dataset='MSL', mode='test')
+    test_dataset = ClassificationDataset(
+        dataset=dataset,
+        subdata=subdata,
+        mode='test',
+        use_genias=use_genias,
+    )
     test_data = torch.tensor(
         data=test_dataset.data,
-        dtype=torch.float32
+        dtype=torch.float32,
     )
     test_data = test_data.unsqueeze(1).transpose(-2, -1).to(device)
-    labels = test_dataset.labels.reshape(-1)
-
-    model.eval()
-
-    logits = model(test_data)
-    logits = logits.detach().cpu().numpy()
+    labels = test_dataset.label.reshape(-1)
+    
+    logits = model.forward(test_data)
+    logits = logits.detach().cpu()
 
     classes = [0 for _ in range(10)]
 
@@ -470,26 +445,19 @@ def classification(
 
     major_class = classes.index(max(classes))
 
-    anomaly_labels = []
     anomaly_scores = []
 
     for i in range(len(logits)):
         logit = logits[i]
         major_probability = logit[major_class]
-        
-        if np.argmax(logit) == major_class:
-            anomaly_labels.append(1)
-        else:
-            anomaly_labels.append(0)
-        
         anomaly_scores.append(1 - major_probability)
 
-    anomaly_labels = np.array(anomaly_labels)
     anomaly_scores = np.array(anomaly_scores)
+    anomaly_scores = anomaly_scores.reshape(-1)
 
     precision, recall, thresholds = precision_recall_curve(
-    y_true=labels,
-    y_score=anomaly_scores,
+        y_true=labels,
+        y_score=anomaly_scores,
     )
 
     auc_pr = auc(recall, precision)
@@ -500,168 +468,164 @@ def classification(
     best_fl = 0
 
     for i in range(len(thresholds)):
-        f1score = f1(precision[i], recall[i])
-        if f1score > best_fl:
-            best_fl = f1score
+        f1_score = f1score(precision=precision[i], recall=recall[i])
+        if f1_score > best_fl:
+            best_fl = f1_score
             best_precision = precision[i]
             best_recall = recall[i]
             best_threshold = thresholds[i]
 
     print('\nResults')
 
-    logging.info(f'\n- Best F1 score: {round(best_fl, 4)}')
-    logging.info(f'- Best Precision: {round(best_precision, 4)}')
-    logging.info(f'- Best Recall: {round(best_recall, 4)}')
-    logging.info(f' -Best Threshold: {best_threshold:.4e}')
-    logging.info(f'\n- AUC-PR: {round(auc_pr, 4)}')
+    print(f'- Best F1 score: {round(best_fl, 4)}')
+    print(f'- Best Precision: {round(best_precision, 4)}')
+    print(f'- Best Recall: {round(best_recall, 4)}')
+    print(f'- Best Threshold: {round(best_threshold, 4)}')
+    print(f'- AUC-PR: {round(auc_pr, 4)}')
 
-    return 
+    with open(log_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([])
+        writer.writerow(
+            ['Best F1', 'Best Precision', 'Best Recall', 'Best Threshold', 'AUC-PR'],
+        )
+        writer.writerow(
+            [
+                round(best_fl, 4),
+                round(best_precision, 4),
+                round(best_recall, 4),
+                round(best_threshold, 4),
+                round(auc_pr, 4)
+            ]
+        )
+    best_anomaly_prediction = np.where(anomaly_scores >= best_threshold, 1, 0)
+    
+    best_f1, best_tp, best_fp, best_fn = f1_stat(
+        prediction=best_anomaly_prediction,
+        gt=labels
+    )
+
+    with open(log_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([])
+        writer.writerow(['Best TP', 'Best FP', 'Best FN'])
+        writer.writerow([best_tp, best_fp, best_fn])
+
+    return best_f1, best_tp, best_fp, best_fn, auc_pr
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     args = argparse.ArgumentParser()
-    args.add_argument(
-        '--exp-name',
-        type=str,
-        help="Experience name. Logs will be classified with this argument."
-    )
-    args.add_argument(
-        '--task',
-        type=str,
-        help="Which model to train. Either 'pretext' or 'classification'."
-    )
-    args.add_argument(
-        '--classification-model-dir',
-        type=str,
-        help="Path for calling the saved pretext model."
-    )
     args.add_argument(
         '--dataset',
         type=str,
-        help="Name of the dataset."
+        help="Dataset. Either 'MSL_SEPARATED' or 'SMAP_SEPARATED'",
     )
     args.add_argument(
-        '--seed',
-        type=int, 
-        default=42,
-        help="Fixed Seed. Default 42."
-    )
-    args.add_argument(
-        '--use-wandb',
-        type=bool, 
-        default=False,
-        help="Control whether use wandb log or not. Default False."
-    )
-    args.add_argument(
-        '--save-ckpt',
-        type=bool, 
-        default=False,
-        help="Save the checkpoint. Default False."
-    )
-    args.add_argument(
-        '--window-size',
-        type=int,
-        default=200,
-        help="Window size. Default 200."
-    )
-    args.add_argument(
-        '--batch-size',
-        type=int,
-        default=50,
-        help="Batch size. Default 50."
+        '--use-genias',
+        type=str2bool,
+        help='Whether to use genias or not.'
     )
     args.add_argument(
         '--gpu-num',
         type=int,
         default=0,
-        help="Which GPU will be used. Default 0."
+        help="gpu number. Default 0.",
     )
     args.add_argument(
-        '--use-genias',
-        type=str2bool,
-        default=False,
-        help="Whether to use GenIAS for generating negative pairs." \
-        "Default False."
-    )
-    args.add_argument(
-        '--pretext-epochs',
+        '-seed',
         type=int,
-        default=30,
-        help="Training epochs for pretext stage. Default 30."
-    )
-    args.add_argument(
-        '--classification-epochs',
-        type=int,
-        default=100,
-        help="Training epochs for classification stage. Default 100."
-    )
-    args.add_argument(
-        '--pretext-learning-rate',
-        type=float,
-        default=1e-3,
-        help="Initial learning rate. Default 1e-3."
-    )
-    args.add_argument(
-        '--classification-learning-rate',
-        type=float,
-        default=1e-2,
-        help="Initial learning rate. Default 1e-2."
-    )
-    args.add_argument(
-        '--model-save-interval',
-        type=int,
-        default=5,
-        help='The model will be saved once in this epochs.'
+        default=42,
+        help='Fixed seed. Default 42.',
     )
     config = args.parse_args()
 
-    assert config.task in ['pretext', 'classification'], \
-    "task must be either 'pretext' or 'classification'."
-    if config.task == 'classification':
-        assert config.classification_model_dir is not None
-    
-    log_time = datetime.now().strftime('%y%m%d_%H%M%S')
-    log_dir = os.path.join('logs', config.task + config.exp_name + f'_{log_time}')
-    model_dir = os.path.join(log_dir, 'model_' + config.task)
-    os.makedirs(log_dir, exist_ok=True)
-    os.makedirs(model_dir, exist_ok=True)
-    set_logging_filehandler(
-        log_file_path=os.path.join(
-            log_dir, 'train_' + config.task + '.log'
-        )
-    )
     fix_seed_all(config.seed)
-    if config.use_wandb:
-        import wandb
-        run = wandb.init(
-            project='GenIAS',
-            entity='ahn40200393-seoul-national-university',
-            name=config.exp_name,
-            config=vars(config),
-        )
 
-    if config.task == 'pretext':
+    assert config.dataset in ['MSL_SEPARATED', 'SMAP_SEPARATED'], \
+    "data-type must be either 'MSL_SEPARATED' or 'SMAP_SEPARATED'"
+    data_list = os.listdir('/data/seungmin/MSL_SEPARATED/train')
+    data_list = sorted(data_list)
+    data_list = [data.replace('_train.npy', '') for data in data_list]
+
+    if config.use_genias:
+        log_dir = f'temp_log/carla/use_genias/{config.dataset}/results.csv'
+    else:
+        log_dir = f'temp_log/carla/without_genias/{config.dataset}/results.csv'
+    
+    with open(log_dir, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([f'Inference result of {config.dataset}'])
+        writer.writerow([])
+        writer.writerow(['subdata', 'Best F1', 'AUC-PR'])
+
+    best_f1_list = []
+    best_tp_list = []
+    best_fp_list = []
+    best_fn_list = []
+    auc_pr_list = []
+
+    for subdata in data_list:
         pretext(
             dataset=config.dataset,
-            log_dir=log_dir,
-            window_size=config.window_size,
-            batch_size=config.batch_size,
-            gpu_num=config.gpu_num,
-            epochs=config.pretext_epochs,
-            learning_rate=config.pretext_learning_rate,
-            model_save_interval=config.model_save_interval,
+            subdata=subdata,
             use_genias=config.use_genias,
-        )
-
-    if config.task == 'classification':
-        classification(
-            dataset=config.dataset,
-            call_model_dir=config.classification_model_dir,
-            window_size=config.window_size,
-            batch_size=config.batch_size,
             gpu_num=config.gpu_num,
-            epochs=config.classification_epochs,
-            learning_rate=config.classification_learning_rate,
-            model_save_interval=config.model_save_interval,
         )
+        best_f1, best_tp, best_fp, best_fn, auc_pr = classification(
+            dataset=config.dataset,
+            subdata=subdata,
+            use_genias=config.use_genias,
+            gpu_num=config.gpu_num
+        )
+        best_f1_list.append(best_f1)
+        best_tp_list.append(best_tp)
+        best_fp_list.append(best_fp)
+        best_fn_list.append(best_fn)
+        auc_pr_list.append(auc_pr)
+
+        with open(log_dir, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([subdata, round(best_f1, 4), round(auc_pr, 4)])
     
+    best_f1_list = np.array(best_f1_list)
+    auc_pr_list = np.array(auc_pr_list)
+
+    f1_score_best = np.max(best_f1_list)
+    f1_micro = mirco_f1(
+        tp_list=best_tp_list,
+        fp_list=best_fp_list,
+        fn_list=best_fn_list
+    )
+    f1_macro = macro_f1(f1_list=best_f1_list)
+    
+    auc_pr_mean = np.mean(auc_pr_list)
+    auc_pr_std = np.std(auc_pr_list)
+
+    print(f'Best F1: {round(f1_score_best, 4)}')
+    print(f'Micro F1: {round(f1_micro, 4)}')
+    print(f'Macro F1: {round(f1_macro, 4)}')
+    print(f'AUC-PR mean: {round(auc_pr_mean, 4)}')
+    print(f'AUC-PR std: {round(auc_pr_std, 4)}')
+
+    with open(log_dir, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([])
+        writer.writerow(
+            [
+                'Best F1',
+                'Micro F1',
+                'Macro F1',
+                'AUC-PR mean',
+                'AUC-PR std'
+            ]
+        )
+        writer.writerow(
+            [
+                round(f1_score_best, 4),
+                round(f1_micro, 4),
+                round(f1_macro, 4),
+                round(auc_pr_mean, 4),
+                round(auc_pr_std, 4),
+            ]
+        )

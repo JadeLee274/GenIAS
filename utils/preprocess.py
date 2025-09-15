@@ -159,7 +159,7 @@ def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
     tau * (distance between the normal data column and the anomaly data colum),
     then the column remains still, converted to normal data otherwise.
     """
-    data_dim = x.shape[1]
+    data_dim = x.shape[-1]
     x_tilde_patched = np.empty_like(x) # torch.emty_like(x_tilde)
 
     for d in range(data_dim):

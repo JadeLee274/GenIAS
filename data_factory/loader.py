@@ -1,28 +1,12 @@
-from copy import deepcopy
 import pandas as pd
-from torch.utils.data import Dataset
-from genias.tcnvae import VAE
 from utils.common_import import *
 from utils.preprocess import *
+from genias.tcnvae import VAE
+DATA_PATH = '/data/seungmin/'
 
-DATA_PATH = 'data'
-VAE_PATH = '../checkpoints/vae'
-CLASSIFICATION_DATA_PATH = 'classification_dataset'
-"""
-Codes for loading data. These codes follows the papers
-
-GenIAS: Generator for Instantiating Anomalies in Time Series,
-Darban et al., 2025
-
-CARLA: Self-Supervised Contrastive Representation Learning for Time Series
-       Anomaly Detection,
-Darban et al., 2024
-       
-GenIAS link: https://arxiv.org/pdf/2502.08262
-CARLA link: https://www.sciencedirect.com/science/article/pii/S0031320324006253
-"""
 
 ############################# Dataset for GenIAS #############################
+
 
 class GenIASDataset(object):
     """
@@ -48,517 +32,227 @@ class GenIASDataset(object):
     def __init__(
         self,
         dataset: str,
+        subdata: str,
         window_size: int = 200,
-        normalize: str = 'min_max',
-        mode: str = 'train',
-        convert_nan: str = 'nan_to_zero',
-        anomaly_processing: str = 'drop',
-        train_ratio: Optional[float] = None,
+        normalize: str = 'mean_std',
     ) -> None:
-        data_path = os.path.join(DATA_PATH, dataset)
+        data_path = None
+
+        if dataset in ['MSL', 'SMAP', 'SMD']:
+            data_path = f'/data/seugmin/{dataset}_SEPARATED/train'
+        else:
+            data_path = f'/data/seungmin/{dataset}'
 
         data = None
         labels = None
         anomalies = None
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            if mode == 'train':
-                data = np.load(os.path.join(data_path, f'{dataset}_train.npy'))
-            elif mode == 'test':
-                data = np.load(os.path.join(data_path, f'{dataset}_test.npy'))
-                labels = np.load(
-                    os.path.join(data_path, f'{dataset}_test_label.npy')
-                )
-                anomalies = data[labels == 1]
-        elif dataset == 'SWaT':
-            if mode == 'train':
-                data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
-                data.drop(
-                    columns=[' Timestamp', 'Normal/Attack'],
-                    inplace=True,
-                )
-                data = data.values[:, 1:]
-            elif mode == 'test':
-                data = pd.read_csv(os.path.join(data_path, 'SWaT_Abormal.csv'))
-                data.drop(columns=[' Timestamp'], inplace=True)
-                data = data.values
-                labels = data[:, -1]
-                anomalies = data[labels == 1]
-                anomalies = anomalies[:, :-1]
-                data = data[:, :-1]
-                labels = np.where(labels == 'Normal', 0, 1)
-        elif 'GECCO' in dataset.upper():
-            data = pd.read_csv(
-                os.path.join(
-                    DATA_PATH,
-                    'GECCO',
-                    dataset,
-                    f'1_{dataset.lower().replace('_', '')}_water_quality.csv'
-                )
+            data = np.load(
+                os.path.join(data_path, f'{subdata}_train.npy')
             )
-            data.drop(columns=['Time'], inplace=True)
+
+        elif dataset == 'SWaT':
+            data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
+            data.drop(
+                columns=[' Timestamp', 'Normal/Attack'],
+                inplace=True,
+            )
             data = data.values[:, 1:]
-            data = np.array(data, dtype=np.float64)
 
-            if anomaly_processing == 'drop':
-                data = drop_anomaly(data)
-            elif anomaly_processing == 'overwrite':
-                data = overwrite_anomaly(data)
-            
-            labels = data[:, -1]
-            labels = np.where(labels == False, 0, 1)
-            data = data[:, :-1]
+        self.data_dim = data.shape[-1]
 
-            train_size = int(data.shape[0] * train_ratio)
-            if mode == 'train':
-                data = data[:train_size, :]
-            elif mode == 'test':
-                data = data[train_size:, :]
-                labels = labels[train_size:]
-        
-        if convert_nan == 'overwrite':
-            data = overwrite_nan(data)
-        elif convert_nan == 'nan_to_zero':
-            data = np.nan_to_num(data)
+        if normalize == 'mean_std':
+            data = mean_std_normalize(data)
+        elif normalize == 'min_max':
+            data = min_max_normalize(data)
 
-        self.data_shape = data.shape
+        self.windows = convert_to_windows(data=data, window_size=window_size)
 
-        self.data = data
-        self.labels = labels
-        self.anomalies = anomalies
-
-        assert normalize in ['min_max', 'mean_std', 'none'], \
-        "'normalize' argument must be either 'min_max' or 'mean_std'."
-
-        self.normalize = normalize
-        self.mode = mode
-        self.window_size = window_size
-    
     def __len__(self) -> int:
-        return len(self.data) - self.window_size + 1
+        return self.windows.shape[0]
     
     def __getitem__(self, idx: int) -> Union[Matrix, Tuple[Matrix, Matrix]]:
-        if self.mode == 'train':
-            window = self.data[idx: idx + self.window_size]
-            
-            if self.normalize == 'min_max':
-                window = min_max_normalize(window)
-            elif self.normalize == 'mean_std':
-                window =  mean_std_normalize(window)
+        return self.windows[idx]
 
-            window = np.float32(window)
-            return window
-            
-        elif self.mode == 'test':
-            window = self.data[idx: idx + self.window_size]
-            label = self.labels[idx: idx + self.window_size]
-
-            if self.normalize == 'min_max':
-                window = min_max_normalize(window)
-            elif self.normalize == 'mean_std':
-                window = mean_std_normalize(self.data[idx: idx + self.window_size])
-
-            window = np.float32(window)
-            label = np.float32(label)
-            
-            return window, label
 
 ############################## Dataset for CARLA ##############################
 
-class PretextDataset(object):
-    """
-    Dataset for CARLA pretext stage.
-    This is the modified version of 'AugmentDatset' of CARLA code.
-    It loads anchor, positive pair, negative pair when mode is 'train'; 
-    and label, in addition, when mode is 'test'.
 
-    Parameters:
-        dataset:     Name of dataset.
-        window_size: Window size of data, positive pair, negative pair.
-                     Default 200.
-        mode:        Whether the dataset is for trainig or test. 
-                     Default 'train'. It must be either 'train' or 'test'.
-        use_genias:  Whether or not to use GanIAS to create negative pairs.
-                     Default True.
-    """
+class PretextDataset(object):
     def __init__(
         self,
         dataset: str,
+        subdata: Optional[str] = None,
         window_size: int = 200,
-        mode: str = 'train',
         use_genias: bool = False,
     ) -> None:
-        print(f'Loading {dataset} dataset...\n')
-        
-        assert mode in ['train', 'test'], \
-        "mode must be either 'train' or 'test'"
-
         self.dataset = dataset
+        self.subdata = subdata
         self.window_size = window_size
-        self.mode = mode
         self.use_genias = use_genias
-        self.anomaly_injection = AnomalyInjection()
 
-        data = None
-        labels = None
+        data_dir = f'/data/seungmin/{dataset}/train/{subdata}_train.npy'
+        self.data = np.load(data_dir)
+        self.data_dim = self.data.shape[-1]
 
-        if dataset in ['MSL', 'SMAP', 'SMD']:
-            if mode == 'train':
-                data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy')
-                )
-            elif mode == 'test':
-                data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_test.npy')
-                )
-                labels = np.load(
-                    os.path.join(
-                        DATA_PATH, dataset, f'{dataset}_test_label.npy'
-                    )
-                )
-                anomalies = data[labels == 1]
-        
-        elif dataset == 'SWaT':
-            if mode == 'train':
-                data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
-                data.drop(
-                    columns=[' Timestamp', 'Normal/Attack'],
-                    inplace=True,
-                )
-                data = data.values[:, 1:]
-            elif mode == 'test':
-                data = pd.read_csv(
-                    os.path.join(DATA_PATH, 'SWaT', 'SWaT_Abormal.csv')
-                )
-                data.drop(columns=[' Timestamp'], inplace=True)
-                data = data.values
-                labels = data[:, -1]
-                anomalies = data[labels == 1]
-                anomalies = anomalies[:, :-1]
-                data = data[:, :-1]
-                labels = np.where(labels == 'Normal', 0, 1)
-        
-        self.data = data
-        mean, std = get_mean_std(data)
-        self.mean = mean
-        self.std = std
+        self.mean, self.std = get_mean_std(x=self.data)
+        self.std = np.where(self.std == 0.0, 1.0, self.std)
+        self.anchors = convert_to_windows(
+            data=self.data,
+            window_size=window_size
+        )
 
-        self.anchors = convert_to_windows(data=data, window_size=window_size)
-        self.data_dim = self.anchors.shape[-1]
-
-        if labels:
-            self.labels = convert_to_windows(
-                data=labels,
-                window_size=window_size
-            )
-        
         patch_coef = 0.3
 
         if dataset == 'MSL':
             patch_coef = 0.4
         elif dataset in ['SMAP', 'Yahoo']:
             patch_coef = 0.2
-        
-        self.get_positive_pairs(patch_coef=patch_coef)
-        self.get_negative_pairs(patch_coef=patch_coef)
 
-        print('Saving negative pairs for classification stage...')
-        classification_data_dir = os.path.join(
-            CLASSIFICATION_DATA_PATH, dataset
-        )
-        os.makedirs(classification_data_dir, exist_ok=True)
+        self.get_pairs(patch_coef=patch_coef)
+    
+    def __len__(self) -> int:
+        return self.anchors.shape[0]
+    
+    def __getitem__(self, idx: int) -> Tuple[Matrix, Matrix, Matrix]:
+            anchor = self.anchors[idx]
+            positive = self.positive_pairs[idx]
+            negative = self.negative_pairs[idx]
 
-        np.save(
-            file=os.path.join(classification_data_dir, 'negative_pairs.npy'),
-            arr=self.negative_pairs,
-        )
+            anchor = (anchor - self.mean) / self.std
+            positive = (positive - self.mean) / self.std
+            negative = (negative - self.mean) / self.std 
 
-    def get_positive_pairs(self, patch_coef: float) -> None:
+            return anchor, positive, negative
+    
+    def get_pairs(self, patch_coef: float) -> None:
         if self.use_genias:
             vae = VAE(
                 window_size=self.window_size,
                 data_dim=self.data_dim,
-                latent_dim = 100 if self.data_dim != 0 else 50,
+                latent_dim=100,
                 depth=10,
             )
-
-            ckpt = torch.load(
-                os.path.join(VAE_PATH, self.dataset, 'epoch_1000.pt')
-            )
-
+            vae_dir = f'temp_checkpoints/vae/{self.dataset.replace('_SEPARATED', '')}/{self.subdata}/epoch_1000.pt'
+            ckpt = torch.load(vae_dir)
             vae.load_state_dict(ckpt['model'])
 
-            positive_pairs = np.empty_like(self.data)
-
-            for i in range(self.data.shape[0]//self.window_size + 1):
-                subdata = self.data[
-                    i * self.window_size: (i + 1) * self.window_size
-                ]
-
-                if subdata.shape[0] != self.window_size:
-                    subdata_temp = np.empty(
-                        shape=(self.window_size, self.data_dim)
-                    )
-                    subdata_temp[:subdata.shape[0]] = subdata
-                    subdata = subdata_temp
-                
-                subdata = torch.tensor(subdata, dtype=torch.float32)
-                subdata = subdata.unsqueeze(0)
-                positive_pair = vae.forward(subdata)[-2]
-                positive_pair = positive_pair.squeeze(0)
-                positive_pair = np.array(positive_pair.detach())
-
-                if subdata.shape[0] != self.window_size:
-                    positive_pair = positive_pair[:subdata.shape[0]]
-                
-                positive_pairs[
-                    i * self.window_size: (i + 1) * self.window_size
-                ] \
-                = positive_pair
-
-            positive_pairs = patch(
-                x=self.data,
-                x_tilde=positive_pairs,
-                tau=patch_coef
-            )
-
-            self.positive_pairs = convert_to_windows(positive_pairs)
+            positive_pairs = []
+            negative_pairs = []
             
-            return
+            for idx in range(self.anchors.shape[0]):
+                anchor = self.anchors[idx]
+                _, _, positive_pair, negative_pair = \
+                vae.forward(torch.tensor(anchor).float().unsqueeze(0))
+                positive_pair = positive_pair.detach().squeeze(0).numpy()
+                negative_pair = negative_pair.detach().squeeze(0).numpy()
+                negative_pair = patch(
+                    x=anchor,
+                    x_tilde=negative_pair,
+                    tau=patch_coef,
+                )
+                positive_pairs.append(positive_pair)
+                negative_pairs.append(negative_pair)
+            
+            self.positive_pairs = np.array(positive_pairs)
+            self.negative_pairs = np.array(negative_pairs)
+
+            negative_save_dir = f'temp_classification/use_genias/{self.dataset}/{self.subdata}'    
+            os.makedirs(negative_save_dir, exist_ok=True)
+            np.save(
+                file=os.path.join(negative_save_dir, 'negative_pairs.npy'),
+                arr=self.negative_pairs
+            )
+            print('Saving negetive pairs for classification stage.')
 
         else:
             positive_pairs = []
 
             for idx in range(self.anchors.shape[0]):
-                if idx > 10:
-                    positive_pair_idx = np.random.randint(idx - 10, idx)
-                    positive_pair = self.anchors[positive_pair_idx]
-                else:
+                if idx < 10:
                     positive_pair = self.anchors[idx]
-                    positive_pair = noise_transformation(x=positive_pair)
-                
+                    positive_pair = noise_transformation(positive_pair)
+                else:
+                    random_idx = np.random.randint(idx - 10, idx)
+                    positive_pair = self.anchors[random_idx]
+
                 positive_pairs.append(positive_pair)
             
             self.positive_pairs = np.array(positive_pairs)
-            
-            return
 
-    def get_negative_pairs(self, patch_coef: float) -> None:
-        if self.use_genias:
-            vae = VAE(
-                window_size=self.window_size,
-                data_dim=self.data_dim,
-                latent_dim = 100 if self.data_dim != 0 else 50,
-                depth=10,
-            )
-
-            ckpt = torch.load(
-                os.path.join(VAE_PATH, self.dataset, 'epoch_1000.pt')
-            )
-
-            vae.load_state_dict(ckpt['model'])
-
-            negative_pairs = np.empty_like(self.data)
-
-            for i in range(self.data.shape[0]//self.window_size + 1):
-                subdata = self.data[
-                    i * self.window_size: (i + 1) * self.window_size
-                ]
-
-                if subdata.shape[0] != self.window_size:
-                    subdata_temp = np.empty(
-                        shape=(self.window_size, self.data_dim)
-                    )
-                    subdata_temp[:subdata.shape[0]] = subdata
-                    subdata = subdata_temp
-                
-                subdata = torch.tensor(subdata, dtype=torch.float32)
-                subdata = subdata.unsqueeze(0)
-                negative_pair = vae.forward(subdata)[-1]
-                negative_pair = negative_pair.squeeze(0)
-                negative_pair = np.array(negative_pair.detach())
-
-                if subdata.shape[0] != self.window_size:
-                    negative_pair = negative_pair[:subdata.shape[0]]
-                
-                negative_pairs[
-                    i * self.window_size: (i + 1) * self.window_size
-                ] \
-                = negative_pair
-
-            negative_pairs = patch(
-                x=self.data,
-                x_tilde=negative_pairs,
-                tau=patch_coef
-            )
-
-            self.negative_pairs = convert_to_windows(negative_pairs)
-        
-        else:
             negative_pairs = []
-            
+            anomaly_injection = AnomalyInjection()
+
             for idx in range(self.anchors.shape[0]):
-                window = self.anchors[idx]
-                negative_pairs.append(
-                    self.anomaly_injection(window)
-                )
+                negative_pair = self.anchors[idx]
+                negative_pair = anomaly_injection(negative_pair)
+                negative_pairs.append(negative_pair)
             
             self.negative_pairs = np.array(negative_pairs)
+            negative_save_dir = f'temp_classification/without_genias/{self.dataset}/{self.subdata}'
+            os.makedirs(negative_save_dir, exist_ok=True)
+            np.save(
+                file=os.path.join(negative_save_dir, 'negative_pairs.npy'),
+                arr=self.negative_pairs
+            )
+            print('Saving negetive pairs for classification stage.\n')
 
         return
-
-    def __len__(self) -> int:
-        return self.anchors.shape[0]
-    
-    def __getitem__(
-        self,
-        idx: int
-    ) -> Union[
-        Tuple[Matrix, Matrix, Matrix],
-        Tuple[Matrix, Matrix, Matrix, Matrix],
-    ]:
-        mean = self.mean
-        std = self.std
-        std = np.where(std==0.0, 1.0, std)
-
-        if self.mode == 'train':
-            anchor = self.anchors[idx]
-            anchor = (anchor - mean) / std
-
-            positive_pair = self.positive_pairs[idx]
-            positive_pair = (positive_pair - mean) / std
-
-            negative_pair = self.negative_pairs[idx]
-            negative_pair = (negative_pair - mean) / std
-
-            return anchor, positive_pair, negative_pair
-        
-        elif self.mode == 'test':
-            anchor = self.anchors[idx]
-            anchor = (anchor - mean) / std
-
-            positive_pair = self.positive_pairs[idx]
-            positive_pair = (positive_pair - mean) / std
-
-            negative_pair = self.negative_pairs[idx]
-            negative_pair = (negative_pair - mean) / std
-
-            label = self.labels[idx]
-
-            return anchor, positive_pair, negative_pair, label        
 
 
 class ClassificationDataset(object):
     def __init__(
         self,
         dataset: str,
-        window_size: int = 200,
+        subdata: str,
         mode: str = 'train',
+        use_genias: bool = False,
     ) -> None:
-        assert mode in ['train', 'test'], \
-        "mode must be either 'train' or 'test'"
+        self.dataset = dataset
+        self.subdata = subdata
+        assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
         self.mode = mode
 
-        data = None
-        labels = None
-        
-        if dataset in ['MSL', 'SMAP', 'SMD']:
-            if mode == 'train':
-                data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_train.npy'))
-            elif mode == 'test':
-                data = np.load(
-                    os.path.join(DATA_PATH, dataset, f'{dataset}_test.npy')
-                )
-                labels = np.load(
-                    os.path.join(
-                        DATA_PATH, dataset, f'{dataset}_test_label.npy'
-                    )
-                )
-                anomalies = data[labels == 1]
-        
-        elif dataset == 'SWaT':
-            if mode == 'train':
-                data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
-                data.drop(
-                    columns=[' Timestamp', 'Normal/Attack'],
-                    inplace=True,
-                )
-                data = data.values[:, 1:]
-            elif mode == 'test':
-                data = pd.read_csv(
-                    os.path.join(DATA_PATH, 'SWaT', 'SWaT_Abormal.csv')
-                )
-                data.drop(columns=[' Timestamp'], inplace=True)
-                data = data.values
-                labels = data[:, -1]
-                anomalies = data[labels == 1]
-                anomalies = anomalies[:, :-1]
-                data = data[:, :-1]
-                labels = np.where(labels == 'Normal', 0, 1)
-
+        data_dir = f'/data/seungmin/{dataset}/{mode}'
+        data = np.load(os.path.join(data_dir, f'{subdata}_{mode}.npy'))
         self.data_dim = data.shape[-1]
-        mean, std = get_mean_std(data)
-        std = np.where(std==0.0, 1.0, std)
-        self.mean = mean
-        self.std = std
 
+        self.mean, self.std = get_mean_std(x=data)
+        self.std = np.where(self.std == 0.0, 1.0, self.std)
+
+        if use_genias:
+            classification_data_dir = f'temp_classification/use_genias/{dataset}/{subdata}'
+        else:
+            classification_data_dir = f'temp_classification/without_genias/{dataset}/{subdata}'
+        
         if mode == 'train':
-            classification_data_dir = f'{CLASSIFICATION_DATA_PATH}/{dataset}'
-
-            # Loads anchors and corresponding negative pairs
-            anchors = convert_to_windows(data=data, window_size=window_size)
+            anchors = convert_to_windows(data=data)
             negative_pairs = np.load(
                 os.path.join(classification_data_dir, 'negative_pairs.npy')
             )
-            # windows = []
-            # for i in range(anchors.shape[0]):
-            #     windows.append(anchors[i])
-            #     windows.append(negative_pairs[i])
-            # self.windows = np.array(windows)
             self.windows = np.concatenate([anchors, negative_pairs], axis=0)
-            
-            # Loads nearest neighbors
+
             anchor_nns = np.load(
-                os.path.join(
-                    classification_data_dir, 'anchor_nns.npy'
-                )
+                os.path.join(classification_data_dir, 'anchor_nns.npy')
             )
             negative_nns = np.load(
-                os.path.join(
-                    classification_data_dir, 'negative_nns.npy'
-                )
+                os.path.join(classification_data_dir, 'negative_nns.npy')
             )
-            # nns = []
-            # for i in range(anchor_nns.shape[0]):
-            #     nns.append(anchor_nns[i])
-            #     nns.append(negative_nns[i])
-            # self.nns = np.array(nns)
             self.nns = np.concatenate([anchor_nns, negative_nns], axis=0)
 
-            # Loads furthest neighbors
             anchor_fns = np.load(
-                os.path.join(
-                    classification_data_dir, 'anchor_fns.npy'
-                )
+                os.path.join(classification_data_dir, 'anchor_fns.npy')
             )
             negative_fns = np.load(
-                os.path.join(
-                    classification_data_dir, 'negative_fns.npy'
-                )
+                os.path.join(classification_data_dir, 'negative_fns.npy')
             )
-            # fns = []
-            # for i in range(anchor_fns.shape[0]):
-            #     fns.append(anchor_fns[i])
-            #     fns.append(negative_fns[i])
-            # self.fns = np.array(fns)
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
-        
-        else:
-            self.data = (data - mean) / std
-            self.labels = labels
 
-        return
+        elif mode == 'test':
+            self.data = (data - self.mean) / self.std
+            label_dir = os.path.join(data_dir, f'{subdata}_{mode}_label.npy')
+            self.label = np.load(label_dir)
 
     def __len__(self) -> int:
         return self.windows.shape[0]
@@ -567,17 +261,14 @@ class ClassificationDataset(object):
         self,
         idx: int
     ) -> Optional[Tuple[Matrix, Array, Array]]:
-        mean = self.mean
-        std = self.std
-
         if self.mode == 'train':
             window = self.windows[idx]
             nearest_neighbor = self.nns[idx]
             furthest_neighbor = self.fns[idx]
 
-            window = (window - mean) / std
-            nearest_neighbor = (nearest_neighbor - mean) / std
-            furthest_neighbor = (furthest_neighbor - mean) / std
+            window = (window - self.mean) / self.std
+            nearest_neighbor = (nearest_neighbor - self.mean) / self.std
+            furthest_neighbor = (furthest_neighbor - self.mean) / self.std
 
             return window, nearest_neighbor, furthest_neighbor
         
