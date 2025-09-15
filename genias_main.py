@@ -1,13 +1,3 @@
-import argparse, logging
-import torch.optim.lr_scheduler as sched
-import torch.optim as optim
-from torch.utils.data import DataLoader
-from utils.common_import import *
-from utils.set_logging import set_logging_filehandler
-from data_factory.loader import GenIASDataset
-from genias.tcnvae import VAE
-from utils.loss import vae_loss
-from utils.fix_seed import fix_seed_all
 """
 Codes for training of TCN-VAE. This code follows the paper
 GenIAS: Generator for Instantiating Anomalies in Time Series,
@@ -17,6 +7,15 @@ Paper link: https://arxiv.org/pdf/2502.08262
 
 The default values of arguments follow the paper.
 """
+import argparse, logging
+import torch.optim.lr_scheduler as sched
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from utils.common_import import *
+from utils.set_logging import set_logging_filehandler
+from data_factory.loader import GenIASDataset
+from genias.tcnvae import VAE
+from utils.loss import vae_loss
 
 
 def str2bool(v: str) -> bool:
@@ -109,7 +108,7 @@ def train_vae(
         kld_loss /= len(train_loader)
         train_loss /= len(train_loader)
 
-        logging.info(f'Epoch {epoch+1} result')
+        logging.info(f'Epoch {epoch+1} loss:')
         logging.info(f'- Reconstruction loss: {recon_loss:.4f}')
         logging.info(f'- Perturbation loss: {pert_loss:.4f}')
         logging.info(f'- Zero perturbation loss: {zero_pert_loss:.4f}')
@@ -155,15 +154,7 @@ if __name__ == '__main__':
         default=0,
         help='What GPU will be used for training. Default 0.'
     )
-    args.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help='Fixed seed. Default 42.'
-    )
     config = args.parse_args()
-
-    fix_seed_all(config.seed)
 
     train_list = sorted(
         os.listdir(f'/data/seungmin/{config.dataset}_SEPARATED/train')

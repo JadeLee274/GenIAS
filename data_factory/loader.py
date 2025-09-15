@@ -2,7 +2,7 @@ import pandas as pd
 from utils.common_import import *
 from utils.preprocess import *
 from genias.tcnvae import VAE
-DATA_PATH = '/data/seungmin/'
+DATA_PATH = '/data/seungmin'
 
 
 ############################# Dataset for GenIAS #############################
@@ -15,19 +15,6 @@ class GenIASDataset(object):
     Parameters:
         dataset:            Name  of the dataset.
         window_size:        Length of the sliding window. Default 200.
-        mode:               Either train or test. Default train.
-
-        convert_nan:        How to convert the data with NaN value. 
-                            Default 'nan_to_zero.'
-                            If dataset is 'GECCO_2018' or 'CECCO_2019', 
-                            then set it to 'overwrite.'
-
-        anomaly_processing: How to process anomalies of the training dataset. 
-                            Default 'drop.'
-
-        train_traio:        The ratio of train set. 
-                            For MSL, SMAP, SMD, SWaT, it is unnecessary.
-                            For GECCO_2018 and GECCO_2019, set it to 0.5.
     """
     def __init__(
         self,
@@ -36,31 +23,15 @@ class GenIASDataset(object):
         window_size: int = 200,
         normalize: str = 'mean_std',
     ) -> None:
-        data_path = None
-
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_path = f'/data/seugmin/{dataset}_SEPARATED/train'
-        else:
-            data_path = f'/data/seungmin/{dataset}'
-
-        data = None
-        labels = None
-        anomalies = None
-
-        if dataset in ['MSL', 'SMAP', 'SMD']:
-            data = np.load(
-                os.path.join(data_path, f'{subdata}_train.npy')
-            )
-
+            data_path = f'{DATA_PATH}/{dataset}_SEPARATED/train/{subdata}.npy'
+            data = np.load(data_path)
+            self.data_dim = data.shape[-1]
         elif dataset == 'SWaT':
             data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
-            data.drop(
-                columns=[' Timestamp', 'Normal/Attack'],
-                inplace=True,
-            )
+            data.drop(columns=[' Timestamp', 'Normal/Attack'], inplace=True)
             data = data.values[:, 1:]
-
-        self.data_dim = data.shape[-1]
+            self.data_dim = data.shape[-1]
 
         if normalize == 'mean_std':
             data = mean_std_normalize(data)
@@ -92,9 +63,10 @@ class PretextDataset(object):
         self.window_size = window_size
         self.use_genias = use_genias
 
-        data_dir = f'/data/seungmin/{dataset}/train/{subdata}_train.npy'
-        self.data = np.load(data_dir)
-        self.data_dim = self.data.shape[-1]
+        if dataset in ['MSL', 'SMAP', 'SMD']:
+            data_dir = f'{DATA_PATH}/{dataset}_SEPARATED/train/{subdata}.npy'
+            self.data = np.load(data_dir)
+            self.data_dim = self.data.shape[-1]
 
         self.mean, self.std = get_mean_std(x=self.data)
         self.std = np.where(self.std == 0.0, 1.0, self.std)
@@ -127,6 +99,8 @@ class PretextDataset(object):
             return anchor, positive, negative
     
     def get_pairs(self, patch_coef: float) -> None:
+        negative_dir = f'classification_dataset/{self.dataset}'   
+
         if self.use_genias:
             vae = VAE(
                 window_size=self.window_size,
@@ -134,8 +108,8 @@ class PretextDataset(object):
                 latent_dim=100,
                 depth=10,
             )
-            vae_dir = f'temp_checkpoints/vae/{self.dataset.replace('_SEPARATED', '')}/{self.subdata}/epoch_1000.pt'
-            ckpt = torch.load(vae_dir)
+            vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
+            ckpt = torch.load(os.path.join(vae_dir, 'epoch_1000.pt'))
             vae.load_state_dict(ckpt['model'])
 
             positive_pairs = []
@@ -158,13 +132,15 @@ class PretextDataset(object):
             self.positive_pairs = np.array(positive_pairs)
             self.negative_pairs = np.array(negative_pairs)
 
-            negative_save_dir = f'temp_classification/use_genias/{self.dataset}/{self.subdata}'    
+            # Saving negetive pairs for classification stage.
+            negative_save_dir = os.path.join(
+                negative_dir, self.subdata, 'use_genias',
+            )
             os.makedirs(negative_save_dir, exist_ok=True)
             np.save(
                 file=os.path.join(negative_save_dir, 'negative_pairs.npy'),
                 arr=self.negative_pairs
             )
-            print('Saving negetive pairs for classification stage.')
 
         else:
             positive_pairs = []
@@ -190,13 +166,16 @@ class PretextDataset(object):
                 negative_pairs.append(negative_pair)
             
             self.negative_pairs = np.array(negative_pairs)
-            negative_save_dir = f'temp_classification/without_genias/{self.dataset}/{self.subdata}'
+            
+            # Saving negative pairs for classification stage.
+            negative_save_dir = os.path.join(
+                negative_dir, self.subdata, 'without_genias',
+            )
             os.makedirs(negative_save_dir, exist_ok=True)
             np.save(
                 file=os.path.join(negative_save_dir, 'negative_pairs.npy'),
                 arr=self.negative_pairs
             )
-            print('Saving negetive pairs for classification stage.\n')
 
         return
 
@@ -215,21 +194,13 @@ class ClassificationDataset(object):
         assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
         self.mode = mode
 
-        data = None
-        labels = None
-        
         if dataset in ['MSL', 'SMAP', 'SMD']:
+            data_dir = f'{DATA_PATH}/{dataset}_SEPARATED'
             if mode == 'train':
-                data = np.load(
-                    os.path.join(DATA_PATH, dataset, 'train', subdata)
-                )
+                data = np.load(f'{data_dir}/train/{subdata}.npy')
             elif mode == 'test':
-                data = np.load(
-                    os.path.join(DATA_PATH, dataset, 'test', subdata)
-                )
-                labels = np.load(
-                    os.path.join(DATA_PATH, dataset, 'test_label', subdata)
-                )
+                data = np.load(f'{data_dir}/test/{subdata}.npy')
+                labels = np.load(f'{data_dir}/label/{subdata}.npy')
         
         elif dataset == 'SWaT':
             if mode == 'train':
@@ -252,14 +223,18 @@ class ClassificationDataset(object):
                 labels = np.where(labels == 'Normal', 0, 1)
 
         self.data_dim = data.shape[-1]
-
         self.mean, self.std = get_mean_std(x=data)
         self.std = np.where(self.std == 0.0, 1.0, self.std)
 
+        classification_dir = f'classification_dataset/{dataset}'
         if use_genias:
-            classification_data_dir = f'temp_classification/use_genias/{dataset}/{subdata}'
+            classification_data_dir = os.path.join(
+                classification_dir, subdata, 'use_genias',
+            )
         else:
-            classification_data_dir = f'temp_classification/without_genias/{dataset}/{subdata}'
+            classification_data_dir = os.path.join(
+                classification_dir, subdata, 'without_genias',
+            )
         
         if mode == 'train':
             anchors = convert_to_windows(data=data, window_size=window_size)
@@ -286,8 +261,7 @@ class ClassificationDataset(object):
 
         elif mode == 'test':
             self.data = (data - self.mean) / self.std
-            label_dir = os.path.join(DATA_PATH, dataset, 'test', subdata)
-            self.label = np.load(label_dir)
+            self.label = labels.reshape(-1)
 
     def __len__(self) -> int:
         return self.windows.shape[0]
