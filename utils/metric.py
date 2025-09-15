@@ -94,12 +94,7 @@ def macro_f1(f1_list: List[float]) -> float:
     Returns:
         Macro F1 score.     
     """
-<<<<<<< HEAD
-    assert len(f1_list) > 1, 'This funcation is for dataset with multiple data' 
-=======
-    assert len(f1_list) > 1, \
-    'This funcation is for dataset with multiple data' 
->>>>>>> main
+    assert len(f1_list) > 1, 'This function is for dataset with multiple data' 
     return round(np.mean(f1_list), 4)
 
 
