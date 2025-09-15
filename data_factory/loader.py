@@ -206,6 +206,7 @@ class ClassificationDataset(object):
         self,
         dataset: str,
         subdata: str,
+        window_size: int = 200,
         mode: str = 'train',
         use_genias: bool = False,
     ) -> None:
@@ -214,8 +215,42 @@ class ClassificationDataset(object):
         assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
         self.mode = mode
 
-        data_dir = f'/data/seungmin/{dataset}/{mode}'
-        data = np.load(os.path.join(data_dir, f'{subdata}_{mode}.npy'))
+        data = None
+        labels = None
+        
+        if dataset in ['MSL', 'SMAP', 'SMD']:
+            if mode == 'train':
+                data = np.load(
+                    os.path.join(DATA_PATH, dataset, 'train', subdata)
+                )
+            elif mode == 'test':
+                data = np.load(
+                    os.path.join(DATA_PATH, dataset, 'test', subdata)
+                )
+                labels = np.load(
+                    os.path.join(DATA_PATH, dataset, 'test_label', subdata)
+                )
+        
+        elif dataset == 'SWaT':
+            if mode == 'train':
+                data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
+                data.drop(
+                    columns=[' Timestamp', 'Normal/Attack'],
+                    inplace=True,
+                )
+                data = data.values[:, 1:]
+            elif mode == 'test':
+                data = pd.read_csv(
+                    os.path.join(DATA_PATH, 'SWaT', 'SWaT_Abormal.csv')
+                )
+                data.drop(columns=[' Timestamp'], inplace=True)
+                data = data.values
+                labels = data[:, -1]
+                anomalies = data[labels == 1]
+                anomalies = anomalies[:, :-1]
+                data = data[:, :-1]
+                labels = np.where(labels == 'Normal', 0, 1)
+
         self.data_dim = data.shape[-1]
 
         self.mean, self.std = get_mean_std(x=data)
@@ -227,7 +262,7 @@ class ClassificationDataset(object):
             classification_data_dir = f'temp_classification/without_genias/{dataset}/{subdata}'
         
         if mode == 'train':
-            anchors = convert_to_windows(data=data)
+            anchors = convert_to_windows(data=data, window_size=window_size)
             negative_pairs = np.load(
                 os.path.join(classification_data_dir, 'negative_pairs.npy')
             )
@@ -251,7 +286,7 @@ class ClassificationDataset(object):
 
         elif mode == 'test':
             self.data = (data - self.mean) / self.std
-            label_dir = os.path.join(data_dir, f'{subdata}_{mode}_label.npy')
+            label_dir = os.path.join(DATA_PATH, dataset, 'test', subdata)
             self.label = np.load(label_dir)
 
     def __len__(self) -> int:

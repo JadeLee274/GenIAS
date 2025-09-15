@@ -58,69 +58,82 @@ def cosine_schedule(
 def pretext(
     dataset: str,
     subdata: str,
-    use_genias: bool = True,
+    use_genias: bool = False,
     epochs: int = 30,
     batch_size: int = 50,
+    learning_rate: float = 1e-3,
     gpu_num: int = 0,
     model_save_interval: int = 5,
     num_neighbors: int = 2,
 ) -> None:
+    """
+    Uses Resnet model and mlp head to map anchor, positive pair, and negative
+    pair to the representation space (with dimension 128, in this case).
+
+    While training, the pretext loss is optimized so that the distance between
+    the anchor and the positive pair get smaller, while that of
+    the anchor and the negative pair get larger, in the representation space.
+
+    The model is saved once in a model_save_interval epochs, in order to be
+    used for the self-supervised stage of CARLA.
+    """
     assert dataset in ['MSL_SEPARATED', 'SMAP_SEPARATED'], \
     "dataset must be one of 'MSL_SEPARATED', 'SMAP_SEPARATED'"
 
-    print(f'Pretext on {dataset} {subdata} start.\n')
+    logging.info('Pretext training loop start...\n')
 
     train_dataset = PretextDataset(
         dataset=dataset,
         subdata=subdata,
         use_genias=use_genias,
     )
-    
-    model = PretextModel(in_channels=train_dataset.data_dim)
+
+    model = PretextModel(
+        in_channels=train_dataset.data_dim,
+        mid_channels=4,
+    )
+
     device = torch.device(f'cuda:{gpu_num}')
+
     model = model.to(device)
-    cri = pretextloss()
+    criterion = pretextloss()
 
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
         shuffle=True,
     )
-    optimizer = optim.Adam(model.parameters())
 
-    if use_genias:
-        save_dir = f'temp_checkpoints/carla/use_genias/{dataset}/pretext/{subdata}'
-    else:
-        save_dir = f'temp_checkpoints/carla/without_genias/{dataset}/pretext/{subdata}'
-
-    os.makedirs(save_dir, exist_ok=True)
+    optimizer = optim.Adam(
+        params=model.parameters(),
+        lr=learning_rate,
+    )
 
     model.train()
 
     for epoch in range(epochs):
-        cosine_schedule(
-            optimizer=optimizer,
-            current_epoch=epoch,
-            total_epochs=epochs
-        )
+        print(f'Epoch {epoch + 1} start.')
+
+        cosine_schedule(optimizer=optimizer, current_epoch=epoch)
         epoch_loss = 0.0
         prev_loss = None
 
         for batch in train_loader:
             optimizer.zero_grad()
-            
-            anchor, positive, negative = batch
-            anchor = anchor.to(device)
-            positive = positive.to(device)
-            negative = negative.to(device)
-            
+            anchor, positive_pair, negative_pair = batch
             B, W, F = anchor.shape
+            anchor = anchor.to(device)
+            positive_pair = positive_pair.to(device)
+            negative_pair = negative_pair.to(device)
+
             triplets = torch.cat(
-                tensors=[anchor, positive, negative],
+                tensors=[anchor, positive_pair, negative_pair],
                 dim=0
-            ).float().view(3*B, F, W)
-            representations = model.forward(triplets)
-            loss = cri(
+            ).float()
+
+            triplets = triplets.view(3 * B, F, W)
+            representations = model(triplets)
+            loss = criterion(
                 representations=representations,
                 current_loss=prev_loss,
             )
@@ -130,7 +143,7 @@ def pretext(
             epoch_loss += prev_loss
         
         epoch_loss /= len(train_loader)
-        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+        logging.info(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
@@ -139,11 +152,14 @@ def pretext(
                     'contrastive_head': model.contrastive_head.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(save_dir, f'epoch_{epoch + 1}.pt'),
+                f=os.path.join(
+                    log_dir, 'model_pretext', f'{subdata.replace(
+                        '.npy', ''
+                        )}_epoch_{epoch + 1}.pt'
+                    )
             )
-        
-    print(f'\nPretext training done. Start selecting neighbors...\n')
 
+    logging.info(f'{subdata} loop done. Start selecting neighborhoods...\n')
     model.eval()
 
     timeseries_loader = DataLoader(
@@ -154,7 +170,7 @@ def pretext(
 
     anchor_reps = []
     negative_reps = []
-        
+
     print('Loading representations of each anchor and its negative pair.')
 
     for batch in timeseries_loader:
@@ -170,7 +186,6 @@ def pretext(
     negative_reps = torch.cat(negative_reps, dim=0).numpy()
     
     reps = np.concatenate([anchor_reps, negative_reps], axis=0)
-    num_anchor_reps = anchor_reps.shape[0]
 
     index_searcher = IndexFlatL2(reps.shape[1])
     assert index_searcher.d == reps.shape[1],\
@@ -182,25 +197,34 @@ def pretext(
         axis=0,
     )
 
-    if use_genias:
-        classification_data_dir = f'temp_classification/use_genias/{dataset}/{subdata}'
-    else:
-        classification_data_dir = f'temp_classification/without_genias/{dataset}/{subdata}'
-   
-    os.makedirs(classification_data_dir, exist_ok=True)
+    classification_data_dir = os.path.join(
+        'classification_dataset', dataset
+    )
+    os.makedirs(os.path.join(
+        classification_data_dir, 'anchor_nn'
+        ), exist_ok=True)
+    os.makedirs(os.path.join(
+        classification_data_dir, 'anchor_fn'
+        ), exist_ok=True
+    )
+    os.makedirs(os.path.join(
+        classification_data_dir, 'negative_nn'
+        ), exist_ok=True
+    )
+    os.makedirs(os.path.join(
+        classification_data_dir, 'negative_fn'
+        ), exist_ok=True)
 
     print(f'\nSelecting top-{num_neighbors} neighbors of the anchor...')
 
     nearest_neighbors = []
     furthest_neighbors = []
 
-    anchor_idx = 0
     for anchor_rep in anchor_reps:
         anchor_query = anchor_rep.reshape(1, -1)
         _, indices = index_searcher.search(anchor_query, reps.shape[0])
         indices = indices.reshape(-1)
-        indices = indices[indices != anchor_idx]
-        nearest_indices = indices[:num_neighbors]
+        nearest_indices = indices[1:num_neighbors + 1]
         furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
             anchor_and_negative_pairs[nearest_indices]
@@ -208,20 +232,21 @@ def pretext(
         furthest_neighbors.append(
             anchor_and_negative_pairs[furthest_indices]
         )
-        anchor_idx += 1
     
-    print('Saving neighborhoods of the anchor...')
+    print('\nSaving nearest neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
         file=os.path.join(
-            classification_data_dir, 'anchor_nns.npy'
+            classification_data_dir, 'anchor_nn', subdata
         ),
         arr=nearest_neighbors,
     )
+
+    print('Saving furthest neighborhoods of the anchor...')
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
         file=os.path.join(
-            classification_data_dir, 'anchor_fns.npy'
+            classification_data_dir, 'anchor_fn', subdata
         ),
         arr=furthest_neighbors,
     )
@@ -231,13 +256,11 @@ def pretext(
     nearest_neighbors = []
     furthest_neighbors = []
 
-    negative_idx = 0
     for negative_rep in negative_reps:
         negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
-        indices = indices[indices != negative_idx + num_anchor_reps]
-        nearest_indices = indices[:num_neighbors]
+        nearest_indices = indices[1:num_neighbors + 1]
         furthest_indices = indices[-num_neighbors:]
         nearest_neighbors.append(
             anchor_and_negative_pairs[nearest_indices]
@@ -245,20 +268,21 @@ def pretext(
         furthest_neighbors.append(
             anchor_and_negative_pairs[furthest_indices]
         )
-        negative_idx += 1
     
-    print('Saving neighborhoods of the negative pair...')
+    print('\nSaving nearest neighborhoods of the anchor...')
     nearest_neighbors = np.array(nearest_neighbors)
     np.save(
         file=os.path.join(
-            classification_data_dir, 'negative_nns.npy'
+            classification_data_dir, 'negative_nn', subdata
         ),
         arr=nearest_neighbors,
     )
+
+    print('Saving furthest neighborhoods of the anchor...')
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
         file=os.path.join(
-            classification_data_dir, 'negative_fns.npy'
+            classification_data_dir, 'negative_fn', subdata
         ),
         arr=furthest_neighbors,
     )
@@ -390,6 +414,29 @@ def classification(
         epoch_entropy_loss /= len(train_loader)
         epoch_loss /= len(train_loader)
         
+        logging.info(f'Epoch {epoch + 1} finished.')
+        logging.info(f'- Consistency loss: {epoch_consistency_loss:.4e}')
+        logging.info(f'- Inconsistency loss: {epoch_inconsistency_loss:.4e}')
+        logging.info(f'- Entropy loss: {epoch_entropy_loss:.4e}')
+        logging.info(f'- Total loss: {epoch_loss:.4e}\n')
+
+
+        if epoch == 0 or (epoch + 1) % model_save_interval == 0:
+            torch.save(
+                obj={
+                    'model': model.state_dict(),
+                    'optim': optimizer.state_dict(),
+                },
+                f=os.path.join(
+                    log_dir, 'model_classification', f'{subdata}_epoch_{epoch + 1}.pt'
+                    ),
+                )
+        
+        epoch_consistency_loss /= len(train_loader)
+        epoch_inconsistency_loss /= len(train_loader)
+        epoch_entropy_loss /= len(train_loader)
+        epoch_loss /= len(train_loader)
+        
         print(f'- Consistency loss: {epoch_consistency_loss:.4e}')
         print(f'- Inconsistency loss: {epoch_inconsistency_loss:.4e}')
         print(f'- Entropy loss: {epoch_entropy_loss:.4e}')
@@ -445,15 +492,22 @@ def classification(
 
     major_class = classes.index(max(classes))
 
+    anomaly_labels = []
     anomaly_scores = []
 
     for i in range(len(logits)):
         logit = logits[i]
         major_probability = logit[major_class]
+        
+        if np.argmax(logit) == major_class:
+            anomaly_labels.append(1)
+        else:
+            anomaly_labels.append(0)
+        
         anomaly_scores.append(1 - major_probability)
 
+    anomaly_labels = np.array(anomaly_labels)
     anomaly_scores = np.array(anomaly_scores)
-    anomaly_scores = anomaly_scores.reshape(-1)
 
     precision, recall, thresholds = precision_recall_curve(
         y_true=labels,
@@ -465,19 +519,24 @@ def classification(
     best_threshold = 0
     best_precision = 0
     best_recall = 0
-    best_fl = 0
+    best_f1 = 0
 
     for i in range(len(thresholds)):
-        f1_score = f1score(precision=precision[i], recall=recall[i])
-        if f1_score > best_fl:
-            best_fl = f1_score
+        f1_score = f1score(precision[i], recall[i])
+        if f1_score > best_f1:
+            best_f1 = f1_score
             best_precision = precision[i]
             best_recall = recall[i]
             best_threshold = thresholds[i]
 
+    best_threshold = 0
+    best_precision = 0
+    best_recall = 0
+    best_f1 = 0
+
     print('\nResults')
 
-    print(f'- Best F1 score: {round(best_fl, 4)}')
+    print(f'- Best F1 score: {round(best_f1, 4)}')
     print(f'- Best Precision: {round(best_precision, 4)}')
     print(f'- Best Recall: {round(best_recall, 4)}')
     print(f'- Best Threshold: {round(best_threshold, 4)}')
@@ -491,7 +550,7 @@ def classification(
         )
         writer.writerow(
             [
-                round(best_fl, 4),
+                round(best_f1, 4),
                 round(best_precision, 4),
                 round(best_recall, 4),
                 round(best_threshold, 4),
@@ -525,6 +584,34 @@ if __name__ == "__main__":
         '--use-genias',
         type=str2bool,
         help='Whether to use genias or not.'
+        '--seed',
+        type=int, 
+        default=42,
+        help="Fixed Seed. Default 42."
+    )
+    args.add_argument(
+        '--use-wandb',
+        type=str2bool, 
+        default=False,
+        help="Control whether use wandb log or not. Default False."
+    )
+    args.add_argument(
+        '--save-ckpt',
+        type=bool, 
+        default=False,
+        help="Save the checkpoint. Default False."
+    )
+    args.add_argument(
+        '--window-size',
+        type=int,
+        default=200,
+        help="Window size. Default 200."
+    )
+    args.add_argument(
+        '--batch-size',
+        type=int,
+        default=50,
+        help="Batch size. Default 50."
     )
     args.add_argument(
         '--gpu-num',
