@@ -15,7 +15,7 @@ classification.py
 
 # Ignore directory
 data/
-logs/
+log/
 practice/
 __pycache__/
 save/
