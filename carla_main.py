@@ -7,7 +7,7 @@ import torch.optim as optim
 from faiss import IndexFlatL2
 from sklearn.metrics import precision_recall_curve, auc
 from utils.common_import import *
-from data_factory.temp_loader import *
+from data_factory.loader import *
 from carla.model import *
 from utils.loss import pretextloss, classificationloss, entropy
 from utils.metric import *
