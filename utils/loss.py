@@ -56,8 +56,8 @@ def pert_loss(
     Returns:
         Perturbation loss.
     """
-    return (F.relu(mse_loss(x, x_hat) - mse_loss(x, x_tilde) + delta_min) \
-    + F.relu(mse_loss(x, x_tilde) - delta_max)).mean(dim=0)
+    return (F.relu(mseloss(x, x_hat) - mseloss(x, x_tilde) + delta_min) \
+    + F.relu(mseloss(x, x_tilde) - delta_max)).mean(dim=0)
 
 
 def zero_pert_loss(x: Tensor, x_tilde: Tensor) -> Tensor:

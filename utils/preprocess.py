@@ -1,7 +1,51 @@
+import ast
 import random
+import pandas as pd
 from faiss import IndexFlatL2
 from utils.common_import import *
 device = torch.device('cuda:0')
+
+
+def get_labels(data: str) -> None:
+    """
+    For divided datasets such as MSL, SMAP, SMD, etc., the test label is not
+    directly available on kaggle. There is a csv file that contains the 
+    informations for such datasets, and this function makes the label by 
+    reading the csv file.
+
+    Parameters:
+        data: Name of data.
+    """
+    test_data_path = f'/data/seungmin/{data}_SEPARATED/test'
+    test_data_list = sorted(os.listdir(test_data_path))
+    test_data_list = [data.replace('_test.npy', '') for data in test_data_list]
+    
+    with open(
+        os.path.join(test_data_path, 'labeled_anomalies.csv'), 'r'
+    ) as file:
+        csv_reader = pd.read_csv(file, delimiter=',')
+
+    for data in test_data_list:
+        data_info = csv_reader[csv_reader['chan_id'] == 'P-15']
+
+        labels = []
+
+        for _, row in data_info.iterrows():
+            anomalies = ast.literal_eval(row['anomaly_sequences'])
+            length = row.iloc[-1]
+            label = np.zeros([length], dtype=bool)
+            for anomaly in anomalies:
+                label[anomaly[0]:anomaly[1] + 1] = True
+            labels.extend(label)
+
+        labels = np.array(labels)
+
+        np.save(
+            file=os.path.join(test_data_path, 'P-15_test_label.npy'),
+            arr=labels
+        )
+    
+    return
 
 
 ####################### GenIAS preprocessing functions########################
@@ -68,15 +112,11 @@ def mean_std_normalize(x: Matrix, eps: float = 1e-8) -> Matrix:
     Returns:
         Normlaized data with respect to maen and standard deviation.
     """
+    mean = np.mean(a=x, axis=0)
+    std = np.std(a=x, axis=0)
+    std = np.where(std == 0.0, 1.0, std)
 
-    for i in range(x.shape[-1]):
-        mean = np.mean(x[:, i])
-        std = np.std(x[:, i])
-        x[:, i] -= mean
-        x[:, i] /= (std + eps)
-    
-    return x
-
+    return (x - mean) / std
 
 def min_max_normalize(x: Matrix) -> Matrix:
     """
@@ -119,7 +159,7 @@ def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
     tau * (distance between the normal data column and the anomaly data colum),
     then the column remains still, converted to normal data otherwise.
     """
-    data_dim = x.shape[1]
+    data_dim = x.shape[-1]
     x_tilde_patched = np.empty_like(x) # torch.emty_like(x_tilde)
 
     for d in range(data_dim):
@@ -134,7 +174,9 @@ def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
 
     return x_tilde_patched
 
+
 ##################### CARLA pretext processing functions #####################
+
 
 def get_mean_std(x: Matrix) -> Vector:
     """
