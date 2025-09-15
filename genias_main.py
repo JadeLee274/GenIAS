@@ -1,14 +1,13 @@
-import csv
-from tqdm import tqdm
-import argparse
+import argparse, logging
 import torch.optim.lr_scheduler as sched
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from utils.common_import import *
+from utils.set_logging import set_logging_filehandler
 from data_factory.loader import GenIASDataset
 from genias.tcnvae import VAE
-from deepsvdd.deepsvdd import SVDD
-from utils.loss import vae_loss, svdd_loss
+from utils.loss import vae_loss
+from utils.fix_seed import fix_seed_all
 """
 Codes for training of TCN-VAE. This code follows the paper
 GenIAS: Generator for Instantiating Anomalies in Time Series,
@@ -34,7 +33,7 @@ def str2bool(v: str) -> bool:
 
 
 def train_vae(
-    data: str,
+    dataset: str,
     subdata: str,
     batch_size: int = 100,
     depth: int = 10,
@@ -46,11 +45,9 @@ def train_vae(
     checkpoint_step: int = 100,
 ) -> None:
     train_data = GenIASDataset(
-        dataset=data,
+        dataset=dataset,
         subdata=subdata,
         window_size=window_size,
-        mode='train',
-        convert_nan='overwrite',
     )
     data_dim = train_data.data_dim
 
@@ -73,33 +70,20 @@ def train_vae(
 
     scheduler = sched.StepLR(optimizer=optimizer, step_size=10, gamma=0.99)
 
-    ckpt_dir = f'temp_checkpoints/vae/{data}/{subdata}'
+    ckpt_dir = f'checkpoints/vae/{dataset}/{subdata}'
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    log_dir = f'temp_log/{data}'
-    os.makedirs(log_dir, exist_ok=True)
+    logging.info(f'Training loop on {dataset} {subdata} dataset start...\n')
 
-    log_path = os.path.join(log_dir, f'{subdata}_log.csv')
-    
-    with open(log_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            ['epoch', 'recon', 'pert', 'zero_pert', 'kld', 'total_loss']
-        )
-
-    start_epoch = 0
-
-    print('Training loop start...')
-
-    for epoch in range(start_epoch, epochs):
+    for epoch in range(epochs):
         recon_loss = 0.0
         pert_loss = 0.0
         zero_pert_loss = 0.0
         kld_loss = 0.0
         train_loss = 0.0
 
-        for data in tqdm(train_loader):
-            data = data.to(device)
+        for data in train_loader:
+            data = data.to(device).float()
             optimizer.zero_grad()
             mu, logvar, x_hat, x_tilde = model(data)
             recon, pert, zero_pert, kld, total_loss = vae_loss(
@@ -125,26 +109,13 @@ def train_vae(
         kld_loss /= len(train_loader)
         train_loss /= len(train_loader)
 
-        print(f'Epoch {epoch+1} Finished.')
-        print(f'Reconstruction loss: {recon_loss:.4f}')
-        print(f'Perturbation loss: {pert_loss:.4f}')
-        print(f'Zero perturbation loss: {zero_pert_loss:.4f}')
-        print(f'KL-Divergence loss: {kld_loss:.4f}')
-        print(f'Total loss: {train_loss:.4f}')
+        logging.info(f'Epoch {epoch+1} result')
+        logging.info(f'- Reconstruction loss: {recon_loss:.4f}')
+        logging.info(f'- Perturbation loss: {pert_loss:.4f}')
+        logging.info(f'- Zero perturbation loss: {zero_pert_loss:.4f}')
+        logging.info(f'- KL-Divergence loss: {kld_loss:.4f}')
+        logging.info(f'- Total loss: {train_loss:.4f}\n')
 
-        with open(log_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(
-                [
-                    epoch+1,
-                    round(recon_loss, 4),
-                    round(pert_loss, 4),
-                    round(zero_pert_loss, 4),
-                    round(kld_loss, 4),
-                    round(train_loss, 4),
-                ]
-            )
-    
         if epoch == 0 or (epoch + 1) % checkpoint_step == 0:
             torch.save(
                 obj={
@@ -154,7 +125,7 @@ def train_vae(
                 f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
             )
             
-    print('Training Finished')
+    logging.info('Training Finished')
 
     return
 
@@ -162,7 +133,7 @@ def train_vae(
 if __name__ == '__main__':
     args = argparse.ArgumentParser()
     args.add_argument(
-        '--data',
+        '--dataset',
         type=str,
         help='Name of the dataset.'
     )
@@ -176,7 +147,7 @@ if __name__ == '__main__':
         '--depth',
         type=int,
         default=10,
-        help='Depth of encoder and decoder of VAE. Default 8.'
+        help='Depth of encoder and decoder of VAE. Default 10.'
     )
     args.add_argument(
         '--gpu-num',
@@ -184,12 +155,24 @@ if __name__ == '__main__':
         default=0,
         help='What GPU will be used for training. Default 0.'
     )
+    args.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help='Fixed seed. Default 42.'
+    )
     config = args.parse_args()
 
+    fix_seed_all(config.seed)
+
     train_list = sorted(
-        os.listdir(f'/data/seungmin/{config.data}_SEPARATED/train')
+        os.listdir(f'/data/seungmin/{config.dataset}_SEPARATED/train')
     )
-    train_list = [f.replace('_train.npy', '') for f in train_list]
+    train_list = [f.replace('.npy', '') for f in train_list]
     
     for subdata in train_list:
-        train_vae(data=config.data, subdata=subdata)
+        log_path = os.path.join(f'log/vae/{config.dataset}')
+        set_logging_filehandler(
+            log_file_path=os.path.join(log_path, f'{subdata}.log')
+        )
+        train_vae(dataset=config.dataset, subdata=subdata)
