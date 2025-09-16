@@ -6,27 +6,33 @@ from utils.common_import import *
 device = torch.device('cuda:0')
 
 
-def get_labels(data: str) -> None:
+########################## File converting functions ##########################
+
+
+def get_labels(data_path: str) -> None:
     """
-    For divided datasets such as MSL, SMAP, SMD, etc., the test label is not
+    For divided datasets such as MSL, SMAP, etc., the test label may not be
     directly available on kaggle. There is a csv file that contains the 
     informations for such datasets, and this function makes the label by 
     reading the csv file.
 
     Parameters:
-        data: Name of data.
+        data_path: Path of data.
     """
-    test_data_path = f'/data/seungmin/{data}_SEPARATED/test'
+    test_data_path = f'{data_path}/test'
     test_data_list = sorted(os.listdir(test_data_path))
-    test_data_list = [data.replace('_test.npy', '') for data in test_data_list]
+    test_data_list = [data.replace('.npy', '') for data in test_data_list]
     
     with open(
-        os.path.join(test_data_path, 'labeled_anomalies.csv'), 'r'
+        os.path.join(data_path, 'labeled_anomalies.csv'), 'r'
     ) as file:
         csv_reader = pd.read_csv(file, delimiter=',')
 
+    label_data_path = f'{data_path}/label'
+    os.makedirs(label_data_path, exist_ok=True)
+
     for data in test_data_list:
-        data_info = csv_reader[csv_reader['chan_id'] == 'P-15']
+        data_info = csv_reader[csv_reader['chan_id'] == data]
 
         labels = []
 
@@ -40,15 +46,102 @@ def get_labels(data: str) -> None:
 
         labels = np.array(labels)
 
-        np.save(
-            file=os.path.join(test_data_path, 'P-15_test_label.npy'),
-            arr=labels
-        )
+        np.save(file=os.path.join(label_data_path, f'{data}.npy'), arr=labels)
     
     return
 
 
-####################### GenIAS preprocessing functions########################
+def txt_to_npy(data_path: str) -> None:
+    """
+    For divided datasets such as SMD, etc., the entire file can be given as
+    .txt files. This function convert such files to .npy files.
+
+    Parameters:
+        data_path: Path of data
+    """
+    train_path = f'{data_path}/train'
+    test_path = f'{data_path}/test'
+    label_path = f'{data_path}/label'
+    train_list = sorted(os.listdir(train_path))
+    test_list = sorted(os.listdir(test_path))
+    label_list = sorted(os.listdir(label_path))
+
+    for train_txt in train_list:
+        lines = []
+        with open(f'{train_path}/{train_txt}', 'r', encoding='utf-8') as f:
+            for line in f:
+                values = line.strip().split(',')
+                line = [float(value) for value in values]
+                lines.append(line)
+        train_npy = np.array(lines, dtype=np.float32)
+        data_name = train_txt.replace('.txt', '.npy')
+        np.save(file=f'{train_path}/{data_name}', arr=train_npy)
+    
+    for test_txt in test_list:
+        lines = []
+        with open(f'{test_path}/{test_txt}', 'r', encoding='utf-8') as f:
+            for line in f:
+                values = line.strip().split(',')
+                line = [float(value) for value in values]
+                lines.append(line)
+        test_npy = np.array(lines, dtype=np.float32)
+        data_name = test_txt.replace('.txt', '.npy')
+        np.save(file=f'{test_path}/{data_name}', arr=test_npy)
+    
+    for label_txt in label_list:
+        labels = []
+        with open(f'{label_path}/{label_txt}', 'r', encoding='utf-8') as f:
+            for label in f:
+                labels.append(int(label))
+        label_npy = np.array(labels, dtype=np.int32).reshape(-1)
+        data_name = label_txt.replace('.txt', '.npy')
+        np.save(file=f'{label_path}/{data_name}', arr=label_npy)
+
+    print('Converted all .txt files to .npy')
+
+    return
+
+
+############################ Normalizing functions ############################
+
+
+def mean_std_normalize(x: Matrix, eps: float = 1e-8) -> Matrix:
+    """
+    Normalize each comlum of data using its mean and standard deviation.
+
+    Parameters:
+        x:   Input data.
+        eps: Constant that prevents dividing by zero.
+        
+    Returns:
+        Normlaized data with respect to maen and standard deviation.
+    """
+    mean = np.mean(a=x, axis=0)
+    std = np.std(a=x, axis=0)
+    std = np.where(std == 0.0, 1.0, std)
+
+    return (x - mean) / std
+
+
+
+def min_max_normalize(x: Matrix) -> Matrix:
+    """
+    Normalize each column of data using minimum and maximum values of this
+    column.
+
+    Parameters:
+        x: Input data.
+    
+    Returns:
+        Normalized data with respect to maximum and minimum.
+    """
+    min_x = np.min(x, axis=0)
+    max_x = np.max(x, axis=0)
+    return (x - min_x) / (max_x - min_x + 1e-4)
+
+
+
+########################## Data dropping functions ###########################
 
 def overwrite_nan(data: Matrix) -> Matrix:
     """
@@ -101,37 +194,7 @@ def overwrite_anomaly(data: Matrix) -> Matrix:
     return data
 
 
-def mean_std_normalize(x: Matrix, eps: float = 1e-8) -> Matrix:
-    """
-    Normalize each comlum of data using its mean and standard deviation.
-
-    Parameters:
-        x:   Input data.
-        eps: Constant that prevents dividing by zero.
-        
-    Returns:
-        Normlaized data with respect to maen and standard deviation.
-    """
-    mean = np.mean(a=x, axis=0)
-    std = np.std(a=x, axis=0)
-    std = np.where(std == 0.0, 1.0, std)
-
-    return (x - mean) / std
-
-def min_max_normalize(x: Matrix) -> Matrix:
-    """
-    Normalize each column of data using minimum and maximum values of this
-    column.
-
-    Parameters:
-        x: Input data.
-    
-    Returns:
-        Normalized data with respect to maximum and minimum.
-    """
-    min_x = np.min(x, axis=0)
-    max_x = np.max(x, axis=0)
-    return (x - min_x) / (max_x - min_x + 1e-4)
+######################### Array processing functions #########################
 
 
 def convert_to_windows(data: Matrix, window_size: int = 200) -> Array:
@@ -141,6 +204,9 @@ def convert_to_windows(data: Matrix, window_size: int = 200) -> Array:
         windows.append(data[i: i + window_size])
 
     return np.array(windows)
+
+
+############################## GenIAS functions ##############################
 
 
 def patch(x: Matrix, x_tilde: Matrix, tau: float) -> Matrix:
