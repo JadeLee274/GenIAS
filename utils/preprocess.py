@@ -9,55 +9,67 @@ device = torch.device('cuda:0')
 ########################## File converting functions ##########################
 
 
-def get_labels(data_path: str) -> None:
+def get_labels(dataset: str) -> None:
     """
-    For divided datasets such as MSL, SMAP, etc., the test label may not be
-    directly available on kaggle. There is a csv file that contains the 
-    informations for such datasets, and this function makes the label by 
-    reading the csv file.
+    Save anomaly label for every test datasets in test set.
 
     Parameters:
-        data_path: Path of data.
+        dataset: Name of dataset where the label is not given. 
+
+    For datasets consisting of more than one data such as MSL, SMAP, SMD, the
+    label may be not directly given. In this case, the dataset may consist of
+    train directory, test directory (where each directory contain .npy files), 
+    and labeled_anomalies.csv file. 
+    
+    The .csv file contains informations on which data points are anomalous, and 
+    this function gets the anomaly label for each test data by reading the .csv
+    file.
     """
-    test_data_path = f'{data_path}/test'
-    test_data_list = sorted(os.listdir(test_data_path))
-    test_data_list = [data.replace('.npy', '') for data in test_data_list]
+    data_path = f'/data/seungmin/{dataset}_SEPARATED'
+    csv_dir = f'{data_path}/labeled_anomalies.csv'
+    label_dir = f'{data_path}/label'
+    os.makedirs(label_dir, exist_ok=True)
     
-    with open(
-        os.path.join(data_path, 'labeled_anomalies.csv'), 'r'
-    ) as file:
-        csv_reader = pd.read_csv(file, delimiter=',')
-
-    label_data_path = f'{data_path}/label'
-    os.makedirs(label_data_path, exist_ok=True)
-
-    for data in test_data_list:
-        data_info = csv_reader[csv_reader['chan_id'] == data]
-
-        labels = []
-
-        for _, row in data_info.iterrows():
-            anomalies = ast.literal_eval(row['anomaly_sequences'])
-            length = row.iloc[-1]
-            label = np.zeros([length], dtype=bool)
-            for anomaly in anomalies:
-                label[anomaly[0]:anomaly[1] + 1] = True
-            labels.extend(label)
-
-        labels = np.array(labels)
-
-        np.save(file=os.path.join(label_data_path, f'{data}.npy'), arr=labels)
+    df = pd.read_csv(csv_dir)
+    data_df = df[df['spacecraft'] == dataset]
     
-    return
+    data_list = sorted(os.listdir(f'{data_path}/test'))
+    data_list = [data.replace('.npy', '') for data in data_list]
+
+    for subdata in data_list:
+        subdata_df = data_df[data_df['chan_id'] == subdata]
+        label_len = int(subdata_df['num_values'].values[0])
+        label = np.zeros(label_len, dtype=bool)
+        
+        for anomaly_sequence in subdata_df['anomaly_sequences'].values:
+            ano_start_end = anomaly_sequence.replace('[', '').replace(']', '')
+            ano_start_end = ano_start_end.strip().split(',')
+            ano_start_indices = ano_start_end[0::2]
+            ano_end_indices = ano_start_end[1::2]
+            ano_start_indices = [int(idx) for idx in ano_start_indices]
+            ano_end_indices = [int(idx) for idx in ano_end_indices]
+            for i in range(len(ano_start_indices)):
+                ano_start_idx = ano_start_indices[i]
+                ano_end_idx = ano_end_indices[i]
+                label[ano_start_idx: ano_end_idx + 1] = 1
+        
+        np.save(file=f'{label_dir}/{subdata}.npy', arr=label)
+    
+    print(f'All labels for {dataset} dataset saved.')
+
+    return None
 
 
 def txt_to_npy(data_path: str) -> None:
     """
-    For divided datasets such as SMD, etc., the entire file can be given as
-    .txt files. This function convert such files to .npy files.
+    Converts .txt file to .npy file.
 
     Parameters:
         data_path: Path of data
+    
+    For datasets consisting of more than one data such as SMD, etc., the entire
+    file can be given as .txt files. This function convert such files to .npy 
+    files.
     """
     train_path = f'{data_path}/train'
     test_path = f'{data_path}/test'
