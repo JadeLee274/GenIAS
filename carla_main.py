@@ -421,7 +421,7 @@ def classification(
                     'model': model.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
+                f=os.path.join(save_dir, f'epoch_{epoch + 1}.pt')
             )
     
     logging.info(f'Starting inference on {dataset} {subdata}...\n')
