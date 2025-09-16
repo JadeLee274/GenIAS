@@ -162,8 +162,5 @@ if __name__ == '__main__':
     train_list = [f.replace('.npy', '') for f in train_list]
     
     for subdata in train_list:
-        log_path = os.path.join(f'log/vae/{config.dataset}')
-        set_logging_filehandler(
-            log_file_path=os.path.join(log_path, f'{subdata}.log')
-        )
+        set_logging_filehandler(log_file_path=f'log/vae/{config.dataset}.log')
         train_vae(dataset=config.dataset, subdata=subdata)

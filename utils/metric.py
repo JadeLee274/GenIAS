@@ -80,7 +80,7 @@ def mirco_f1(
     precision = (sum_tp) / (sum_tp + sum_fp)
     recall = (sum_tp) / (sum_tp + sum_fn)
 
-    return (2 * precision + recall) + (precision + recall)
+    return (2 * precision * recall) + (precision + recall)
 
 
 def macro_f1(f1_list: List[float]) -> float:
