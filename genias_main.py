@@ -163,4 +163,8 @@ if __name__ == '__main__':
     
     for subdata in train_list:
         set_logging_filehandler(log_file_path=f'log/vae/{config.dataset}.log')
-        train_vae(dataset=config.dataset, subdata=subdata)
+        train_vae(
+            dataset=config.dataset,
+            subdata=subdata,
+            gpu_num=config.gpu_num
+        )
