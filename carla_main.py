@@ -589,21 +589,28 @@ if __name__ == "__main__":
 
     
     best_f1_list = np.array(best_f1_list)
+    best_tp_list = np.array(best_tp_list)
+    best_fp_list = np.array(best_fp_list)
+    best_fn_list = np.array(best_fn_list)
     auc_pr_list = np.array(auc_pr_list)
 
     f1_score_best = np.max(best_f1_list)
-    f1_micro = mirco_f1(
+    precision, recall, f1_micro = mirco_f1(
         tp_list=best_tp_list,
         fp_list=best_fp_list,
         fn_list=best_fn_list
     )
+
     f1_macro = macro_f1(f1_list=best_f1_list)
     
     auc_pr_mean = np.mean(auc_pr_list)
     auc_pr_std = np.std(auc_pr_list)
 
-    logging.info(f'Best F1: {round(f1_score_best, 4)}')
-    logging.info(f'Micro F1: {round(f1_micro, 4)}')
-    logging.info(f'Macro F1: {round(f1_macro, 4)}')
-    logging.info(f'AUC-PR mean: {round(auc_pr_mean, 4)}')
-    logging.info(f'AUC-PR std: {round(auc_pr_std, 4)}')
+    logging.info('Scores')
+    logging.info(f'- Best F1: {round(f1_score_best, 4)}')
+    logging.info(f'- Micro F1: {round(f1_micro, 4)}')
+    logging.info(f'- Precision: {round(precision, 4)}')
+    logging.info(f'- Recall: {round(recall, 4)}')
+    logging.info(f'- AUC-PR mean: {round(auc_pr_mean, 4)}')
+    logging.info(f'- AUC-PR std: {round(auc_pr_std, 4)}')
+    logging.info(f'- Macro F1: {round(f1_macro, 4)}')

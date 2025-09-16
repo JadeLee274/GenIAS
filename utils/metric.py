@@ -57,7 +57,7 @@ def mirco_f1(
     tp_list: List[int],
     fp_list: List[int],
     fn_list: List[int],
-) -> float:
+) -> Tuple[float, float, float]:
     """
     For dataset that consists of more than one train/test datasets, it first
     sums up all total true positives, false positives, and false negatives. 
@@ -70,7 +70,7 @@ def mirco_f1(
         fn_list: The list of number of false negatives from each test data.
 
     Returns:
-        Micro F1 score.
+        Precision, recall, (micro) F1 score.
     """
     assert (len(tp_list) == len(fp_list)) and(len(fp_list) == len(fn_list)), \
     'Lengths of tp_list, fp_list, fn_list mismatch'
@@ -79,8 +79,9 @@ def mirco_f1(
     sum_fn = sum(fn_list)
     precision = (sum_tp) / (sum_tp + sum_fp)
     recall = (sum_tp) / (sum_tp + sum_fn)
+    f1 = (2 * precision * recall) / (precision + recall)
 
-    return (2 * precision * recall) + (precision + recall)
+    return precision, recall, f1
 
 
 def macro_f1(f1_list: List[float]) -> float:
