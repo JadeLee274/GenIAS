@@ -57,7 +57,8 @@ def cosine_schedule(
 def pretext(
     dataset: str,
     subdata: Optional[str] = None,
-    use_genias: bool = False,
+    scheme: str = 'carla',
+    shuffle_step: Optional[int] = None,
     epochs: int = 30,
     batch_size: int = 50,
     learning_rate: float = 1e-3,
@@ -102,13 +103,16 @@ def pretext(
     The model is saved once in a model_save_interval epochs, in order to be
     used for the self-supervised stage of CARLA.
     """
+    assert scheme in ['carla', 'genias', 'shuffle'], \
+    "scheme argument must be 'carla', 'genias', 'shuffle'"
 
     print(f'Pretext training on {dataset} {subdata} start...\n')
 
     train_dataset = PretextDataset(
         dataset=dataset,
         subdata=subdata,
-        use_genias=use_genias,
+        scheme=scheme,
+        shuffle_step=shuffle_step
     )
     data_dim = train_dataset.data_dim
     model = PretextModel(in_channels=data_dim, mid_channels=4)
@@ -127,12 +131,18 @@ def pretext(
         lr=learning_rate,
     )
 
-    if use_genias:
-        ckpt_dir = f'checkpoints/pretext/{dataset}/{subdata}/use_genias'
-    else:
-        ckpt_dir = f'checkpoints/pretext/{dataset}/{subdata}/without_genias'
+    ckpt_dir = f'checkpoints/pretext/{dataset}'
+    classification_dir = f'classification_datset/{dataset}'
     
+    if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        ckpt_dir = f'{ckpt_dir}/{subdata}/{scheme}'
+        classification_dir = f'{classification_dir}/{subdata}/{scheme}'
+    else:
+        ckpt_dir = f'{ckpt_dir}/{scheme}'
+        classification_dir = f'{classification_dir}/{scheme}'
+
     os.makedirs(ckpt_dir, exist_ok=True)
+    os.makedirs(classification_dir, exist_ok=True)
 
     model.train()
 
@@ -175,10 +185,11 @@ def pretext(
                     'contrastive_head': model.contrastive_head.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
+                f=f'{ckpt_dir}/epoch_{epoch + 1}.pt'
             )
 
     print(f'Pretext training on {dataset} {subdata} finished.')
+
     print(f'Start saving top-{num_neighbors} neighbors...')
     model.eval()
 
@@ -216,17 +227,6 @@ def pretext(
         axis=0,
     )
 
-    if use_genias:
-        classification_dir = os.path.join(
-            'classification_dataset', dataset, subdata, 'use_genias',
-        )
-    else:
-        classification_dir = os.path.join(
-            'classification_dataset', dataset, subdata, 'without_genias',
-        )
-    
-    os.makedirs(classification_dir, exist_ok=True)
-
     # Selecting nearest/furthest neighborhoods of the anchor.
     nearest_neighbors = []
     furthest_neighbors = []
@@ -248,11 +248,11 @@ def pretext(
     nearest_neighbors = np.array(nearest_neighbors)
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
-        file=os.path.join(classification_dir, 'anchor_nns.npy'),
+        file=f'{classification_dir}/anchor_nns.npy',
         arr=nearest_neighbors,
     )
     np.save(
-        file=os.path.join(classification_dir, 'anchor_fns.npy'),
+        file=f'{classification_dir}/anchor_fns.npy',
         arr=furthest_neighbors,
     )
 
@@ -277,11 +277,11 @@ def pretext(
     nearest_neighbors = np.array(nearest_neighbors)
     furthest_neighbors = np.array(furthest_neighbors)
     np.save(
-        file=os.path.join(classification_dir, 'negative_nns.npy'),
+        file=f'{classification_dir}/negative_nns.npy',
         arr=nearest_neighbors,
     )
     np.save(
-        file=os.path.join(classification_dir, 'negative_fns.npy'),
+        file=f'{classification_dir}/negative_fns.npy',
         arr=furthest_neighbors,
     )
 
@@ -293,7 +293,7 @@ def pretext(
 def classification(
     dataset: str,
     subdata: Optional[str] = None,
-    use_genias: bool = False,
+    pretext_scheme: str = 'carla',
     gpu_num: int = 0,
     epochs: int = 100,
     batch_size: int = 50,
@@ -306,19 +306,28 @@ def classification(
         dataset=dataset,
         subdata=subdata,
         mode='train',
-        use_genias=use_genias
+        pretext_scheme=pretext_scheme,
     )
     data_dim = train_dataset.data_dim
     model = ClassificationModel(in_channels=data_dim)
 
-    if use_genias:
-        ckpt_dir = f'checkpoints/pretext/{dataset}/{subdata}/use_genias'
-        ckpt = torch.load(os.path.join(ckpt_dir, 'epoch_30.pt'))
+    resnet_dir = f'checkpoints/pretext/{dataset}'
+    classification_dir = f'classification_datset/{dataset}'
+    ckpt_dir = f'checkpoints/{dataset}'
+    
+    if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        resnet_dir = f'{resnet_dir}/{subdata}/{pretext_scheme}'
+        classification_dir = f'{classification_dir}/{subdata}/{pretext_scheme}'
+        ckpt_dir = f'{ckpt_dir}/{subdata}/{pretext_scheme}'
     else:
-        ckpt_dir = f'checkpoints/pretext/{dataset}/{subdata}/without_genias'
-        ckpt = torch.load(os.path.join(ckpt_dir, 'epoch_30.pt'))
+        resnet_dir = f'{resnet_dir}/{pretext_scheme}'
+        classification_dir = f'{classification_dir}/{pretext_scheme}'
+        ckpt_dir = f'{ckpt_dir}/{pretext_scheme}'
 
-    model.resnet.load_state_dict(ckpt['resnet'])
+    os.makedirs(ckpt_dir, exist_ok=True)
+
+    resnet_ckpt = torch.load(f'{resnet_dir}/epoch_30.pt')
+    model.resnet.load_state_dict(resnet_ckpt['resnet'])
     model = model.to(device)
 
     train_loader = DataLoader(
@@ -331,13 +340,6 @@ def classification(
         lr=learning_rate,
     )
     criterion = classificationloss()
-
-    if use_genias:
-        save_dir = f'checkpoints/classification/{dataset}/{subdata}/use_genias'
-    else:
-        save_dir = f'checkpoints/classification/{dataset}/{subdata}/without_genias'
-
-    os.makedirs(save_dir, exist_ok=True)
 
     logging.info(f'Classification training on {dataset} {subdata} start...\n')
     model.train()
@@ -421,7 +423,7 @@ def classification(
                     'model': model.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(save_dir, f'epoch_{epoch + 1}.pt')
+                f=f'{ckpt_dir}/epoch_{epoch + 1}.pt',
             )
     
     logging.info(f'Starting inference on {dataset} {subdata}...\n')
@@ -431,7 +433,7 @@ def classification(
         dataset=dataset,
         subdata=subdata,
         mode='test',
-        use_genias=use_genias,
+        pretext_scheme=pretext_scheme,
     )
     test_data = torch.tensor(
         data=test_dataset.data,
@@ -507,9 +509,10 @@ if __name__ == "__main__":
         help="Dataset. Either 'MSL_SEPARATED' or 'SMAP_SEPARATED'",
     )
     args.add_argument(
-        '--use-genias',
-        type=str2bool,
-        help='Whether to use genias or not.'
+        '--pretext-scheme',
+        type=str,
+        default='carla',
+        help="How the pairs are made in pretext stage. Default 'carla'"
     )
     args.add_argument(
         '--use-wandb',
@@ -542,10 +545,7 @@ if __name__ == "__main__":
     log_dir = f'log/carla/{config.dataset}'
     os.makedirs(log_dir, exist_ok=True)
 
-    if config.use_genias:
-        log_file_path = f'{log_dir}/use_genias_results.log'
-    else:
-        log_file_path = f'{log_dir}/without_genias_results.log'
+    log_file_path = f'{log_dir}/{config.pretext_scheme}_results.log'
     
     set_logging_filehandler(log_file_path=log_file_path)
     logging.info(f'Train and inference log of {config.dataset}')
@@ -565,13 +565,13 @@ if __name__ == "__main__":
             pretext(
                 dataset=config.dataset,
                 subdata=subdata,
-                use_genias=config.use_genias,
+                scehme=config.pretext_scheme,
                 gpu_num=config.gpu_num,
             )
             best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
                 dataset=config.dataset,
                 subdata=subdata,
-                use_genias=config.use_genias,
+                pretext_scheme=config.pretext_scheme,
                 gpu_num=config.gpu_num
             )
             best_f1_list.append(best_f1_score)
@@ -588,11 +588,11 @@ if __name__ == "__main__":
         pretext(
             dataset=config.dataset,
             use_genias=config.use_genias,
-            gpu_num=config.gpu_num
+            scheme=config.pretext_scheme
         )
         best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
             dataset=config.dataset,
-            use_genias=config.use_genias,
+            pretext_scheme=config.pretext_scheme,
             gpu_num=config.gpu_num
         )
         best_f1_list.append(best_f1_score)
