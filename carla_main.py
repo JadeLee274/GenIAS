@@ -551,9 +551,9 @@ if __name__ == "__main__":
     logging.info(f'Train and inference log of {config.dataset}')
 
     if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-        data_dir = f'/data/seungmin/{config.dataset}_SEPARATED/train'
+        data_dir = f'data/{config.dataset}/train'
     else:
-        data_dir = f'/data/seungmin/{config.dataset}'
+        data_dir = f'data/{config.dataset}'
 
     best_f1_list = []
     best_tp_list = []

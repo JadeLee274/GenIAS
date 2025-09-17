@@ -2,7 +2,6 @@ import pandas as pd
 from utils.common_import import *
 from utils.preprocess import *
 from genias.tcnvae import VAE
-DATA_PATH = '/data/seungmin'
 
 
 ############################# Dataset for GenIAS #############################
@@ -24,7 +23,7 @@ class GenIASDataset(object):
         normalize: str = 'mean_std',
     ) -> None:
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_path = f'{DATA_PATH}/{dataset}_SEPARATED/train/{subdata}.npy'
+            data_path = f'data/{dataset}/train/{subdata}.npy'
             data = np.load(data_path)
             self.data_dim = data.shape[-1]
         elif dataset == 'SWaT':
@@ -75,7 +74,7 @@ class PretextDataset(object):
         self.use_genias = use_genias
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_dir = f'{DATA_PATH}/{dataset}_SEPARATED/train/{subdata}.npy'
+            data_dir = f'data/{dataset}/train/{subdata}.npy'
             self.data = np.load(data_dir)
             self.data_dim = self.data.shape[-1]
 
@@ -222,7 +221,7 @@ class ClassificationDataset(object):
         self.mode = mode
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_dir = f'{DATA_PATH}/{dataset}_SEPARATED'
+            data_dir = f'{data}/{dataset}'
             if mode == 'train':
                 data = np.load(f'{data_dir}/train/{subdata}.npy')
             elif mode == 'test':
@@ -231,7 +230,7 @@ class ClassificationDataset(object):
         
         elif dataset == 'SWaT':
             if mode == 'train':
-                data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
+                data = pd.read_csv(os.path.join(data, 'SWaT_Normal.csv'))
                 data.drop(
                     columns=[' Timestamp', 'Normal/Attack'],
                     inplace=True,
@@ -239,7 +238,7 @@ class ClassificationDataset(object):
                 data = data.values[:, 1:]
             elif mode == 'test':
                 data = pd.read_csv(
-                    os.path.join(DATA_PATH, 'SWaT', 'SWaT_Abormal.csv')
+                    os.path.join(data, 'SWaT', 'SWaT_Abormal.csv')
                 )
                 data.drop(columns=[' Timestamp'], inplace=True)
                 data = data.values
