@@ -161,13 +161,13 @@ if __name__ == '__main__':
     config = args.parse_args()
 
     if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-        data_dir = f'data/{config.dataset}/train'
-        train_list = sorted(os.listdir(f'{data_dir}/train'))
+        data_dir = os.path.join('data', config.dataset, 'train')
+        train_list = sorted(os.listdir(data_dir))
         train_list = [f.replace('.npy', '') for f in train_list]
 
         for subdata in train_list:
             set_logging_filehandler(
-                log_file_path=f'log/vae/{config.dataset}.log'
+                log_file_path=os.path.join('log/vae', f'{config.dataset}.log')
             )
             train_vae(
                 dataset=config.dataset,
@@ -176,7 +176,9 @@ if __name__ == '__main__':
             )
     
     else:
-        set_logging_filehandler(log_file_path=f'log/vae/{config.dataset}.log')
+        set_logging_filehandler(
+            log_file_path=os.path.join('log/vae', f'{config.dataset}.log')
+        )
         train_vae(
             dataset=config.dataset,
             gpu_num=config.gpu_num

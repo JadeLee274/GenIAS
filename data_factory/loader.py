@@ -128,11 +128,11 @@ class PretextDataset(object):
                 latent_dim=100,
                 depth=10,
             )
+            vae_dir = os.path.join('checkpoints/vae', self.dataset)
 
             if self.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
                 vae_dir = os.path.join(vae_dir, self.subdata)
             
-            vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
             vae_ckpt = torch.load(os.path.join(vae_dir, 'epoch_1000.pt'))
             vae.load_state_dict(vae_ckpt['model'])
             vae.eval()

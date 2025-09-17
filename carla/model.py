@@ -1,6 +1,5 @@
 from utils.common_import import *
 from .resnet import ResNet
-RESNET_PATH = '../checkpoints/resnet'
 
 
 class PretextModel(nn.Module):

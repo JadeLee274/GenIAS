@@ -555,13 +555,13 @@ if __name__ == "__main__":
 
     fix_seed_all(config.seed)
 
-    log_dir = f'log/carla/{config.dataset}'
+    log_dir = os.path.join('log/carla', config.dataset)
     os.makedirs(log_dir, exist_ok=True)
 
     if config.use_genias:
-        log_file_path = f'{log_dir}/use_genias_results.log'
+        log_file_path = os.path.join(log_dir, 'use_genias_results.log')
     else:
-        log_file_path = f'{log_dir}/without_genias_results.log'
+        log_file_path = os.path.join(log_dir, 'without_genias_results.log')
     
     set_logging_filehandler(log_file_path=log_file_path)
     logging.info(f'Train and inference log of {config.dataset}')
