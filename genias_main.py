@@ -157,7 +157,7 @@ if __name__ == '__main__':
     config = args.parse_args()
 
     train_list = sorted(
-        os.listdir(f'/data/seungmin/{config.dataset}_SEPARATED/train')
+        os.listdir(f'data/{config.dataset}/train')
     )
     train_list = [f.replace('.npy', '') for f in train_list]
     

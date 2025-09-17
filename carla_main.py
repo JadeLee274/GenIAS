@@ -56,7 +56,7 @@ def cosine_schedule(
 
 def pretext(
     dataset: str,
-    subdata: str,
+    subdata: Optional[str] = None,
     use_genias: bool = False,
     epochs: int = 30,
     batch_size: int = 50,
@@ -292,7 +292,7 @@ def pretext(
 
 def classification(
     dataset: str,
-    subdata: str,
+    subdata: Optional[str] = None,
     use_genias: bool = False,
     gpu_num: int = 0,
     epochs: int = 100,
@@ -550,30 +550,48 @@ if __name__ == "__main__":
     set_logging_filehandler(log_file_path=log_file_path)
     logging.info(f'Train and inference log of {config.dataset}')
 
-    if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-        data_dir = f'/data/seungmin/{config.dataset}_SEPARATED/train'
-    else:
-        data_dir = f'/data/seungmin/{config.dataset}'
-
     best_f1_list = []
     best_tp_list = []
     best_fp_list = []
     best_fn_list = []
     auc_pr_list = []
 
-    data_list = sorted(os.listdir(data_dir))
-    data_list = [data.replace('.npy', '') for data in data_list]
+    if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        data_dir = f'data/{config.dataset}/train'
+        data_list = sorted(os.listdir(data_dir))
+        data_list = [data.replace('.npy', '') for data in data_list]
 
-    for subdata in data_list:
+        for subdata in data_list:
+            pretext(
+                dataset=config.dataset,
+                subdata=subdata,
+                use_genias=config.use_genias,
+                gpu_num=config.gpu_num,
+            )
+            best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
+                dataset=config.dataset,
+                subdata=subdata,
+                use_genias=config.use_genias,
+                gpu_num=config.gpu_num
+            )
+            best_f1_list.append(best_f1_score)
+            best_tp_list.append(best_tp)
+            best_fp_list.append(best_fp)
+            best_fn_list.append(best_fn)
+            auc_pr_list.append(auc_pr)
+
+            logging.info(f'- True Positives: {best_tp}')
+            logging.info(f'- False Positives: {best_fp}')
+            logging.info(f'- False Negatives: {best_fn}\n')
+    
+    else:
         pretext(
             dataset=config.dataset,
-            subdata=subdata,
             use_genias=config.use_genias,
-            gpu_num=config.gpu_num,
+            gpu_num=config.gpu_num
         )
         best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
             dataset=config.dataset,
-            subdata=subdata,
             use_genias=config.use_genias,
             gpu_num=config.gpu_num
         )
@@ -587,7 +605,6 @@ if __name__ == "__main__":
         logging.info(f'- False Positives: {best_fp}')
         logging.info(f'- False Negatives: {best_fn}\n')
 
-    
     best_f1_list = np.array(best_f1_list)
     best_tp_list = np.array(best_tp_list)
     best_fp_list = np.array(best_fp_list)
@@ -599,12 +616,10 @@ if __name__ == "__main__":
         tp_list=best_tp_list,
         fp_list=best_fp_list,
         fn_list=best_fn_list
-    )
-
-    f1_macro = macro_f1(f1_list=best_f1_list)
-    
+    )    
     auc_pr_mean = np.mean(auc_pr_list)
     auc_pr_std = np.std(auc_pr_list)
+    f1_macro = macro_f1(f1_list=best_f1_list)
 
     logging.info('Scores')
     logging.info(f'- Best F1: {round(f1_score_best, 4)}')
@@ -614,3 +629,4 @@ if __name__ == "__main__":
     logging.info(f'- AUC-PR mean: {round(auc_pr_mean, 4)}')
     logging.info(f'- AUC-PR std: {round(auc_pr_std, 4)}')
     logging.info(f'- Macro F1: {round(f1_macro, 4)}')
+        

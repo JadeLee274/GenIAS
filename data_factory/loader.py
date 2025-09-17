@@ -2,7 +2,6 @@ import pandas as pd
 from utils.common_import import *
 from utils.preprocess import *
 from genias.tcnvae import VAE
-DATA_PATH = '/data/seungmin'
 
 
 ############################# Dataset for GenIAS #############################
@@ -19,16 +18,16 @@ class GenIASDataset(object):
     def __init__(
         self,
         dataset: str,
-        subdata: str,
+        subdata: Optional[str] = None,
         window_size: int = 200,
         normalize: str = 'mean_std',
     ) -> None:
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_path = f'{DATA_PATH}/{dataset}_SEPARATED/train/{subdata}.npy'
+            data_path = f'data/{dataset}/train/{subdata}.npy'
             data = np.load(data_path)
             self.data_dim = data.shape[-1]
         elif dataset == 'SWaT':
-            data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
+            data = pd.read_csv(f'data/{dataset}/SWaT_Normal.csv')
             data.drop(columns=[' Timestamp', 'Normal/Attack'], inplace=True)
             data = data.values[:, 1:]
             self.data_dim = data.shape[-1]
@@ -64,9 +63,14 @@ class PretextDataset(object):
         self.use_genias = use_genias
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_dir = f'{DATA_PATH}/{dataset}_SEPARATED/train/{subdata}.npy'
+            data_dir = f'data/{dataset}/train/{subdata}.npy'
             self.data = np.load(data_dir)
             self.data_dim = self.data.shape[-1]
+
+        elif dataset == 'SWaT':
+            data = pd.read_csv(f'data/{dataset}/SWaT_Normal.csv')
+            data.drop(columns=[' Timestamp', 'Normal/Attack'], inplace=True)
+            data = data.values[:, 1:]
 
         self.mean, self.std = get_mean_std(x=self.data)
         self.std = np.where(self.std == 0.0, 1.0, self.std)
@@ -75,7 +79,7 @@ class PretextDataset(object):
             window_size=window_size
         )
 
-        patch_coef = 0.3
+        patch_coef = 0.05 # another options are 0.1, 0.6
 
         if dataset == 'MSL':
             patch_coef = 0.4
@@ -184,7 +188,7 @@ class ClassificationDataset(object):
     def __init__(
         self,
         dataset: str,
-        subdata: str,
+        subdata: Optional[str] = None,
         window_size: int = 200,
         mode: str = 'train',
         use_genias: bool = False,
@@ -195,7 +199,7 @@ class ClassificationDataset(object):
         self.mode = mode
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_dir = f'{DATA_PATH}/{dataset}_SEPARATED'
+            data_dir = f'data/{dataset}'
             if mode == 'train':
                 data = np.load(f'{data_dir}/train/{subdata}.npy')
             elif mode == 'test':
@@ -204,21 +208,17 @@ class ClassificationDataset(object):
         
         elif dataset == 'SWaT':
             if mode == 'train':
-                data = pd.read_csv(os.path.join(DATA_PATH, 'SWaT_Normal.csv'))
+                data = pd.read_csv(f'data/{dataset}/SWaT_Normal.csv')
                 data.drop(
                     columns=[' Timestamp', 'Normal/Attack'],
                     inplace=True,
                 )
                 data = data.values[:, 1:]
             elif mode == 'test':
-                data = pd.read_csv(
-                    os.path.join(DATA_PATH, 'SWaT', 'SWaT_Abormal.csv')
-                )
+                data = pd.read_csv(f'data/{dataset}/SWaT_Abormal.csv')
                 data.drop(columns=[' Timestamp'], inplace=True)
                 data = data.values
                 labels = data[:, -1]
-                anomalies = data[labels == 1]
-                anomalies = anomalies[:, :-1]
                 data = data[:, :-1]
                 labels = np.where(labels == 'Normal', 0, 1)
 

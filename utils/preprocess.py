@@ -25,7 +25,7 @@ def get_labels(dataset: str) -> None:
     this function gets the anomaly label for each test data by reading the .csv
     file.
     """
-    data_path = f'/data/seungmin/{dataset}_SEPARATED'
+    data_path = f'data/{dataset}'
     csv_dir = f'{data_path}/labeled_anomalies.csv'
     label_dir = f'{data_path}/label'
     os.makedirs(label_dir, exist_ok=True)
