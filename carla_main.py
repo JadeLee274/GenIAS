@@ -56,7 +56,7 @@ def cosine_schedule(
 
 def pretext(
     dataset: str,
-    subdata: str,
+    subdata: Optional[str] = None,
     use_genias: bool = False,
     epochs: int = 30,
     batch_size: int = 50,
@@ -127,10 +127,15 @@ def pretext(
         lr=learning_rate,
     )
 
+    ckpt_dir = os.path.join('checkpoints/pretext', dataset)
+
+    if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        ckpt_dir = os.path.join(ckpt_dir, subdata)
+
     if use_genias:
-        ckpt_dir = f'checkpoints/pretext/{dataset}/{subdata}/use_genias'
+        ckpt_dir = os.path.join(ckpt_dir, 'use_genias')
     else:
-        ckpt_dir = f'checkpoints/pretext/{dataset}/{subdata}/without_genias'
+        ckpt_dir = os.path.join(ckpt_dir, 'without_genias')
     
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -179,6 +184,7 @@ def pretext(
             )
 
     print(f'Pretext training on {dataset} {subdata} finished.')
+
     print(f'Start saving top-{num_neighbors} neighbors...')
     model.eval()
 
@@ -292,7 +298,7 @@ def pretext(
 
 def classification(
     dataset: str,
-    subdata: str,
+    subdata: Optional[str] = None,
     use_genias: bool = False,
     gpu_num: int = 0,
     epochs: int = 100,
@@ -311,14 +317,19 @@ def classification(
     data_dim = train_dataset.data_dim
     model = ClassificationModel(in_channels=data_dim)
 
-    if use_genias:
-        ckpt_dir = f'checkpoints/pretext/{dataset}/{subdata}/use_genias'
-        ckpt = torch.load(os.path.join(ckpt_dir, 'epoch_30.pt'))
-    else:
-        ckpt_dir = f'checkpoints/pretext/{dataset}/{subdata}/without_genias'
-        ckpt = torch.load(os.path.join(ckpt_dir, 'epoch_30.pt'))
+    resnet_dir = os.path.join('checkpoints/pretext', dataset)
 
-    model.resnet.load_state_dict(ckpt['resnet'])
+    if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        resnet_dir = os.path.join(resnet_dir, subdata)
+
+    if use_genias:
+        resnet_dir = os.path.join(resnet_dir, 'use_genias')
+        resnet_ckpt = torch.load(os.path.join(resnet_dir, 'epoch_30.pt'))
+    else:
+        resnet_dir = os.path.join(resnet_dir, 'without_genias')
+        resnet_ckpt = torch.load(os.path.join(resnet_dir, 'epoch_30.pt'))
+
+    model.resnet.load_state_dict(resnet_ckpt['resnet'])
     model = model.to(device)
 
     train_loader = DataLoader(
@@ -332,12 +343,17 @@ def classification(
     )
     criterion = classificationloss()
 
-    if use_genias:
-        save_dir = f'checkpoints/classification/{dataset}/{subdata}/use_genias'
-    else:
-        save_dir = f'checkpoints/classification/{dataset}/{subdata}/without_genias'
+    ckpt_dir = os.path.join('checkpoints/classification', dataset)
 
-    os.makedirs(save_dir, exist_ok=True)
+    if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        ckpt_dir = os.path.join(ckpt_dir, subdata)
+
+    if use_genias:
+        ckpt_dir = os.path.join(ckpt_dir, 'without_genias')
+    else:
+        ckpt_dir = os.path.join(ckpt_dir, 'use_genias')
+
+    os.makedirs(ckpt_dir, exist_ok=True)
 
     logging.info(f'Classification training on {dataset} {subdata} start...\n')
     model.train()
@@ -421,7 +437,7 @@ def classification(
                     'model': model.state_dict(),
                     'optim': optimizer.state_dict(),
                 },
-                f=os.path.join(save_dir, f'epoch_{epoch + 1}.pt')
+                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
             )
     
     logging.info(f'Starting inference on {dataset} {subdata}...\n')
@@ -550,30 +566,49 @@ if __name__ == "__main__":
     set_logging_filehandler(log_file_path=log_file_path)
     logging.info(f'Train and inference log of {config.dataset}')
 
-    if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-        data_dir = f'data/{config.dataset}/train'
-    else:
-        data_dir = f'data/{config.dataset}'
-
     best_f1_list = []
     best_tp_list = []
     best_fp_list = []
     best_fn_list = []
     auc_pr_list = []
 
-    data_list = sorted(os.listdir(data_dir))
-    data_list = [data.replace('.npy', '') for data in data_list]
+    if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        data_dir = os.path.join('data', config.dataset, 'train')
+        data_list = sorted(os.listdir(data_dir))
+        data_list = [data.replace('.npy', '') for data in data_list]
 
-    for subdata in data_list:
+        for subdata in data_list:
+            pretext(
+                dataset=config.dataset,
+                subdata=subdata,
+                use_genias=config.use_genias,
+                gpu_num=config.gpu_num,
+            )
+            best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
+                dataset=config.dataset,
+                subdata=subdata,
+                use_genias=config.use_genias,
+                gpu_num=config.gpu_num
+            )
+            best_f1_list.append(best_f1_score)
+            best_tp_list.append(best_tp)
+            best_fp_list.append(best_fp)
+            best_fn_list.append(best_fn)
+            auc_pr_list.append(auc_pr)
+
+            logging.info(f'- True Positives: {best_tp}')
+            logging.info(f'- False Positives: {best_fp}')
+            logging.info(f'- False Negatives: {best_fn}\n')
+
+    else:
+        data_dir = os.path.join('data', config.dataset)
         pretext(
             dataset=config.dataset,
-            subdata=subdata,
             use_genias=config.use_genias,
             gpu_num=config.gpu_num,
         )
         best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
             dataset=config.dataset,
-            subdata=subdata,
             use_genias=config.use_genias,
             gpu_num=config.gpu_num
         )
@@ -586,7 +621,6 @@ if __name__ == "__main__":
         logging.info(f'- True Positives: {best_tp}')
         logging.info(f'- False Positives: {best_fp}')
         logging.info(f'- False Negatives: {best_fn}\n')
-
     
     best_f1_list = np.array(best_f1_list)
     best_tp_list = np.array(best_tp_list)

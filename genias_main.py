@@ -69,7 +69,11 @@ def train_vae(
 
     scheduler = sched.StepLR(optimizer=optimizer, step_size=10, gamma=0.99)
 
-    ckpt_dir = f'checkpoints/vae/{dataset}/{subdata}'
+    ckpt_dir = os.path.join('checkpoints/vae', dataset)
+
+    if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        ckpt_dir = os.path.join(ckpt_dir, subdata)
+        
     os.makedirs(ckpt_dir, exist_ok=True)
 
     logging.info(f'Training loop on {dataset} {subdata} dataset start...\n')
