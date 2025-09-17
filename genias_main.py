@@ -156,15 +156,24 @@ if __name__ == '__main__':
     )
     config = args.parse_args()
 
-    train_list = sorted(
-        os.listdir(f'/data/seungmin/{config.dataset}_SEPARATED/train')
-    )
-    train_list = [f.replace('.npy', '') for f in train_list]
+    if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        data_dir = f'data/{config.dataset}/train'
+        train_list = sorted(os.listdir(f'{data_dir}/train'))
+        train_list = [f.replace('.npy', '') for f in train_list]
+
+        for subdata in train_list:
+            set_logging_filehandler(
+                log_file_path=f'log/vae/{config.dataset}.log'
+            )
+            train_vae(
+                dataset=config.dataset,
+                subdata=subdata,
+                gpu_num=config.gpu_num
+            )
     
-    for subdata in train_list:
+    else:
         set_logging_filehandler(log_file_path=f'log/vae/{config.dataset}.log')
         train_vae(
             dataset=config.dataset,
-            subdata=subdata,
             gpu_num=config.gpu_num
         )
