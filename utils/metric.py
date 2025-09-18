@@ -2,6 +2,7 @@ from sklearn.metrics import precision_recall_curve, auc
 from utils.common_import import *
 from data_factory.loader import ClassificationDataset
 from carla.model import ClassificationModel
+from utils.fix_seed import fix_seed_all
 
 
 ######################### Metrics for CARLA inference ######################### 
@@ -131,6 +132,8 @@ def inference(dataset: str, gpu_num: int, pretext_scheme: str) -> None:
     assert pretext_scheme in ['carla', 'genias', 'shuffle'], \
     "pretext_scheme must be either 'carla', 'genias', 'shuffle'"
 
+    fix_seed_all(42)
+
     device = torch.device(f'cuda:{gpu_num}')
 
     best_f1_list = []
@@ -157,6 +160,7 @@ def inference(dataset: str, gpu_num: int, pretext_scheme: str) -> None:
         ckpt = torch.load(os.path.join(ckpt_path, 'epoch_100.pt'))
         model.load_state_dict(ckpt['model'])
         model = model.to(device)
+        model.eval()
 
         logits = []
 
