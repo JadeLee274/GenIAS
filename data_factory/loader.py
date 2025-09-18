@@ -272,7 +272,7 @@ class ClassificationDataset(object):
         assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
         self.mode = mode
 
-        assert pretext_scheme in ['carla', 'genais', 'shuffle'], \
+        assert pretext_scheme in ['carla', 'genias', 'shuffle'], \
         "pretext_scheme must be 'carla', 'genias', of 'shuffle'"
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
@@ -298,7 +298,7 @@ class ClassificationDataset(object):
                 labels = data[:, -1]
                 data = data[:, :-1]
                 labels = np.where(labels == 'Normal', 0, 1)
-
+        
         self.data_dim = data.shape[-1]
         self.mean, self.std = get_mean_std(x=data)
         self.std = np.where(self.std == 0.0, 1.0, self.std)
@@ -326,8 +326,18 @@ class ClassificationDataset(object):
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
 
         elif mode == 'test':
-            self.data = (data - self.mean) / self.std
-            self.label = labels.reshape(-1)
+            self.windows = convert_to_windows(
+                data=data, window_size=window_size
+            )
+            labels = convert_to_windows(data=labels, window_size=window_size)
+            window_labels = []
+            for label in labels:
+                if np.sum(label) > 0:
+                    window_labels.append(1)
+                else:
+                    window_labels.append(0)
+            self.labels = np.array(window_labels).reshape(-1)
+
 
     def __len__(self) -> int:
         return self.windows.shape[0]
@@ -335,7 +345,7 @@ class ClassificationDataset(object):
     def __getitem__(
         self,
         idx: int
-    ) -> Optional[Tuple[Matrix, Array, Array]]:
+    ) -> Union[Tuple[Matrix, Array, Array], Tuple[Matrix, int]]:
         if self.mode == 'train':
             window = self.windows[idx]
             nearest_neighbor = self.nns[idx]
@@ -348,4 +358,4 @@ class ClassificationDataset(object):
             return window, nearest_neighbor, furthest_neighbor
         
         else:
-            return self.data[idx]
+            return self.windows[idx]

@@ -132,7 +132,7 @@ def pretext(
     )
 
     ckpt_dir = f'checkpoints/pretext/{dataset}'
-    classification_dir = f'classification_datset/{dataset}'
+    classification_dir = f'classification_dataset/{dataset}'
     
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
         ckpt_dir = f'{ckpt_dir}/{subdata}/{scheme}'
@@ -313,7 +313,7 @@ def classification(
 
     resnet_dir = f'checkpoints/pretext/{dataset}'
     classification_dir = f'classification_datset/{dataset}'
-    ckpt_dir = f'checkpoints/{dataset}'
+    ckpt_dir = f'checkpoints/classification/{dataset}'
     
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
         resnet_dir = f'{resnet_dir}/{subdata}/{pretext_scheme}'
@@ -435,22 +435,19 @@ def classification(
         mode='test',
         pretext_scheme=pretext_scheme,
     )
-    test_data = torch.tensor(
-        data=test_dataset.data,
-        dtype=torch.float32,
-    )
-    test_data = test_data.unsqueeze(1).transpose(-2, -1).to(device)
-    labels = test_dataset.label
-    anomaly_ratio = 100 * (np.sum(labels) / len(labels))
-    logging.info(f'- Anomaly ratio: {round(anomaly_ratio, 2)}%')
-    
-    logits = model.forward(test_data)
-    logits = logits.detach().cpu()
+
+    logits = []
+
+    for idx in range(len(test_dataset)):
+        test_data = torch.tensor(test_dataset[idx], dtype=torch.float32)
+        test_data = test_data.to(device)
+        logit = model.forward(test_data.unsqueeze(0).transpose(-2, -1))
+        logit = logit.squeeze(0).detach().cpu().numpy()
+        logits.append(logit)
 
     classes = [0 for _ in range(10)]
 
-    for i in range(len(logits)):
-        logit = logits[i]
+    for logit in logits:
         max_index = np.argmax(logit)
         classes[max_index] += 1
 
@@ -466,7 +463,7 @@ def classification(
     anomaly_scores = np.array(anomaly_scores)
 
     precision, recall, thresholds = precision_recall_curve(
-        y_true=labels,
+        y_true=test_dataset.labels,
         y_score=anomaly_scores,
     )
 
@@ -495,7 +492,7 @@ def classification(
     
     best_f1_score, best_tp, best_fp, best_fn = f1_stat(
         prediction=best_anomaly_prediction,
-        gt=labels
+        gt=test_dataset.labels
     )
 
     return best_f1_score, best_tp, best_fp, best_fn, auc_pr
@@ -513,6 +510,11 @@ if __name__ == "__main__":
         type=str,
         default='carla',
         help="How the pairs are made in pretext stage. Default 'carla'"
+    )
+    args.add_argument(
+        '--pretext-shuffle-step',
+        type=int,
+        help='CARLA and GenIAS scheme alters every this timestep. For shuffle.'
     )
     args.add_argument(
         '--use-wandb',
@@ -565,7 +567,8 @@ if __name__ == "__main__":
             pretext(
                 dataset=config.dataset,
                 subdata=subdata,
-                scehme=config.pretext_scheme,
+                scheme=config.pretext_scheme,
+                shuffle_step=config.pretext_shuffle_step,
                 gpu_num=config.gpu_num,
             )
             best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
