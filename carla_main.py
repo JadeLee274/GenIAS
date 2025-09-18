@@ -449,22 +449,19 @@ def classification(
         mode='test',
         use_genias=use_genias,
     )
-    test_data = torch.tensor(
-        data=test_dataset.data,
-        dtype=torch.float32,
-    )
-    test_data = test_data.unsqueeze(1).transpose(-2, -1).to(device)
-    labels = test_dataset.label
-    anomaly_ratio = 100 * (np.sum(labels) / len(labels))
-    logging.info(f'- Anomaly ratio: {round(anomaly_ratio, 2)}%')
     
-    logits = model.forward(test_data)
-    logits = logits.detach().cpu()
+    logits = []
+
+    for idx in range(len(test_dataset)):
+        test_data = torch.tensor(test_dataset[idx], dtype=torch.float32)
+        test_data = test_data.to(device)
+        logit = model.forward(test_data.unsqueeze(0).transpose(-2, -1))
+        logit = logit.squeeze(0).detach().cpu().numpy()
+        logits.append(logit)
 
     classes = [0 for _ in range(10)]
 
-    for i in range(len(logits)):
-        logit = logits[i]
+    for logit in logits:
         max_index = np.argmax(logit)
         classes[max_index] += 1
 
@@ -472,15 +469,14 @@ def classification(
 
     anomaly_scores = []
 
-    for i in range(len(logits)):
-        logit = logits[i]
+    for logit in logits:
         major_probability = logit[major_class]
         anomaly_scores.append(1 - major_probability)
 
     anomaly_scores = np.array(anomaly_scores)
 
     precision, recall, thresholds = precision_recall_curve(
-        y_true=labels,
+        y_true=test_dataset.labels,
         y_score=anomaly_scores,
     )
 
@@ -509,7 +505,7 @@ def classification(
     
     best_f1_score, best_tp, best_fp, best_fn = f1_stat(
         prediction=best_anomaly_prediction,
-        gt=labels
+        gt=test_dataset.labels,
     )
 
     return best_f1_score, best_tp, best_fp, best_fn, auc_pr

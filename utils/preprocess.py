@@ -25,15 +25,15 @@ def get_labels(dataset: str) -> None:
     this function gets the anomaly label for each test data by reading the .csv
     file.
     """
-    data_path = f'data/{dataset}_SEPARATED'
-    csv_dir = f'{data_path}/labeled_anomalies.csv'
-    label_dir = f'{data_path}/label'
+    data_path = os.path.join('data', dataset)
+    csv_dir = os.path.join(data_path, 'labeled_anomalies.csv')
+    label_dir = os.path.join(data_path, label)
     os.makedirs(label_dir, exist_ok=True)
     
     df = pd.read_csv(csv_dir)
     data_df = df[df['spacecraft'] == dataset]
     
-    data_list = sorted(os.listdir(f'{data_path}/test'))
+    data_list = sorted(os.listdir(os.path.join(data_path, 'test')))
     data_list = [data.replace('.npy', '') for data in data_list]
 
     for subdata in data_list:
@@ -53,14 +53,14 @@ def get_labels(dataset: str) -> None:
                 ano_end_idx = ano_end_indices[i]
                 label[ano_start_idx: ano_end_idx + 1] = 1
         
-        np.save(file=f'{label_dir}/{subdata}.npy', arr=label)
+        np.save(file=os.path.join(label_dir, f'{subdata}.npy'), arr=label)
     
     print(f'All labels for {dataset} dataset saved.')
 
     return None
 
 
-def txt_to_npy(data_path: str) -> None:
+def txt_to_npy(dataset: str) -> None:
     """
     Converts .txt file to .npy file.
 
@@ -71,9 +71,9 @@ def txt_to_npy(data_path: str) -> None:
     file can be given as .txt files. This function convert such files to .npy 
     files.
     """
-    train_path = f'{data_path}/train'
-    test_path = f'{data_path}/test'
-    label_path = f'{data_path}/label'
+    train_path = os.path.join('data', dataset, 'train')
+    test_path = os.path.join('data', dataset, 'test')
+    label_path = os.path.join('data', dataset, 'label')
     train_list = sorted(os.listdir(train_path))
     test_list = sorted(os.listdir(test_path))
     label_list = sorted(os.listdir(label_path))
