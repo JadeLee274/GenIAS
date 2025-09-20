@@ -63,7 +63,7 @@ def pretext(
     learning_rate: float = 1e-3,
     gpu_num: int = 0,
     model_save_interval: int = 5,
-    num_neighbors: int = 2,
+    num_neighbors: int = 5,
 ) -> None:
     """
     Training code for pretext stage of CARLA.
@@ -81,7 +81,7 @@ def pretext(
         model_save_inderval: The pretext model is saved once in this epoch.
                              Default 5.
         num_neighbors:       The number of nearest/furthest neighbors that will
-                             be saved after the pretext training. Default 2.
+                             be saved after the pretext training. Default 5.
 
     Examples:
     >>> If dataset is 'MSL', then it consists of 27 subdata, C-1, C-2, ..., 
@@ -122,10 +122,7 @@ def pretext(
         batch_size=batch_size,
         shuffle=True,
     )
-    optimizer = optim.Adam(
-        params=model.parameters(),
-        lr=learning_rate,
-    )
+    optimizer = optim.Adam(params=model.parameters(), lr=learning_rate)
 
     ckpt_dir = os.path.join('checkpoints/pretext', dataset)
 
@@ -217,11 +214,6 @@ def pretext(
     f'{index_searcher.d} != {reps.shape[1]}'
     index_searcher.add(reps)
 
-    anchor_and_negative_pairs = np.concatenate(
-        [train_dataset.anchors, train_dataset.negative_pairs],
-        axis=0,
-    )
-
     if use_genias:
         classification_dir = os.path.join(
             'classification_dataset', dataset, subdata, 'use_genias',
@@ -233,62 +225,54 @@ def pretext(
     
     os.makedirs(classification_dir, exist_ok=True)
 
-    # Selecting nearest/furthest neighborhoods of the anchor.
-    nearest_neighbors = []
-    furthest_neighbors = []
+    # Selecting nearest/furthest indices of the anchor.
+    nearest_indices_list = []
+    furthest_indices_list = []
 
     for anchor_rep in anchor_reps:
         anchor_query = anchor_rep.reshape(1, -1)
         _, indices = index_searcher.search(anchor_query, reps.shape[0])
         indices = indices.reshape(-1)
-        nearest_indices = indices[1:num_neighbors + 1]
+        nearest_indices = indices[1: num_neighbors+1]
         furthest_indices = indices[-num_neighbors:]
-        nearest_neighbors.append(
-            anchor_and_negative_pairs[nearest_indices]
-        )
-        furthest_neighbors.append(
-            anchor_and_negative_pairs[furthest_indices]
-        )
+        nearest_indices_list.append(nearest_indices)
+        furthest_indices_list.append(furthest_indices)
     
-    # Saving nearest/furthest neighborhoods of the anchor.
-    nearest_neighbors = np.array(nearest_neighbors)
-    furthest_neighbors = np.array(furthest_neighbors)
+    # Saving nearest/furthest indices of the anchor.
+    nearest_indices_list = np.array(nearest_indices_list)
+    furthest_indices_list = np.array(furthest_indices_list)
     np.save(
-        file=os.path.join(classification_dir, 'anchor_nns.npy'),
-        arr=nearest_neighbors,
+        file=os.path.join(classification_dir, 'anchor_nn_indices.npy'),
+        arr=nearest_indices_list,
     )
     np.save(
-        file=os.path.join(classification_dir, 'anchor_fns.npy'),
-        arr=furthest_neighbors,
+        file=os.path.join(classification_dir, 'anchor_fn_indices.npy'),
+        arr=furthest_indices_list,
     )
 
-    # Selecting nearest/furthest neighborhoods of the negative pair.
-    nearest_neighbors = []
-    furthest_neighbors = []
+    # Selecting nearest/furthest indices of the negative pair.
+    nearest_indices_list = []
+    furthest_indices_list = []
 
     for negative_rep in negative_reps:
         negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
-        nearest_indices = indices[1:num_neighbors + 1]
+        nearest_indices = indices[1: num_neighbors+1]
         furthest_indices = indices[-num_neighbors:]
-        nearest_neighbors.append(
-            anchor_and_negative_pairs[nearest_indices]
-        )
-        furthest_neighbors.append(
-            anchor_and_negative_pairs[furthest_indices]
-        )
+        nearest_indices_list.append(nearest_indices)
+        furthest_indices_list.append(furthest_indices)
     
     # Saving nearest/furthest neighborhoods of the negative the pair.
-    nearest_neighbors = np.array(nearest_neighbors)
-    furthest_neighbors = np.array(furthest_neighbors)
+    nearest_indices_list = np.array(nearest_indices_list)
+    furthest_indices_list = np.array(furthest_indices_list)
     np.save(
-        file=os.path.join(classification_dir, 'negative_nns.npy'),
-        arr=nearest_neighbors,
+        file=os.path.join(classification_dir, 'negative_nn_indices.npy'),
+        arr=nearest_indices_list,
     )
     np.save(
-        file=os.path.join(classification_dir, 'negative_fns.npy'),
-        arr=furthest_neighbors,
+        file=os.path.join(classification_dir, 'negative_fn_indices.npy'),
+        arr=furthest_indices_list,
     )
 
     print('\nPretext stage done. Moving on to classification stage.\n')

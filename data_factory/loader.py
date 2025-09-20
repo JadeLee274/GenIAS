@@ -102,20 +102,22 @@ class PretextDataset(object):
             patch_coef = 0.2
 
         self.get_pairs(patch_coef=patch_coef)
+
+        return
     
     def __len__(self) -> int:
         return self.anchors.shape[0]
     
     def __getitem__(self, idx: int) -> Tuple[Matrix, Matrix, Matrix]:
-            anchor = self.anchors[idx]
-            positive = self.positive_pairs[idx]
-            negative = self.negative_pairs[idx]
+        anchor = self.anchors[idx]
+        positive = self.positive_pairs[idx]
+        negative = self.negative_pairs[idx]
 
-            anchor = (anchor - self.mean) / self.std
-            positive = (positive - self.mean) / self.std
-            negative = (negative - self.mean) / self.std 
+        anchor = (anchor - self.mean) / self.std
+        positive = (positive - self.mean) / self.std
+        negative = (negative - self.mean) / self.std 
 
-            return anchor, positive, negative
+        return anchor, positive, negative
     
     def get_pairs(self, patch_coef: float) -> None:
         negative_dir = os.path.join('classification_dataset', self.dataset)
@@ -232,8 +234,10 @@ class ClassificationDataset(object):
     ) -> None:
         self.dataset = dataset
         self.subdata = subdata
+
         assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
         self.mode = mode
+        
         data_dir = os.path.join('data', dataset)
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
@@ -283,20 +287,48 @@ class ClassificationDataset(object):
             )
             self.windows = np.concatenate([anchors, negative_pairs], axis=0)
 
-            anchor_nns = np.load(
-                os.path.join(classification_data_dir, 'anchor_nns.npy')
+            anchor_nn_indices = np.load(
+                os.path.join(classification_data_dir, 'anchor_nn_indices.npy')
             )
-            negative_nns = np.load(
-                os.path.join(classification_data_dir, 'negative_nns.npy')
+            negative_nn_indices = np.load(
+                os.path.join(classification_data_dir, 'negative_nn_indices.npy')
             )
+            
+            anchor_nns = []
+            negative_nns = []
+
+            for idx in range(anchors.shape[0]):
+                anchor_nn_idx = anchor_nn_indices[idx]
+                anchor_nns.append(self.windows[anchor_nn_idx])
+
+            for idx in range(negative_pairs.shape[0]):
+                negative_nn_idx = negative_nn_indices[idx]
+                negative_nns.append(self.windows[negative_nn_idx])
+            
+            anchor_nns = np.array(anchor_nns)
+            negative_nns = np.array(negative_nns)
             self.nns = np.concatenate([anchor_nns, negative_nns], axis=0)
 
-            anchor_fns = np.load(
-                os.path.join(classification_data_dir, 'anchor_fns.npy')
+            anchor_fn_indices = np.load(
+                os.path.join(classification_data_dir, 'anchor_fn_indices.npy')
             )
-            negative_fns = np.load(
-                os.path.join(classification_data_dir, 'negative_fns.npy')
+            negative_fn_indices = np.load(
+                os.path.join(classification_data_dir, 'negative_fn_indices.npy')
             )
+
+            anchor_fns = []
+            negative_fns = []
+
+            for idx in range(anchors.shape[0]):
+                anchor_fn_idx = anchor_fn_indices[idx]
+                anchor_fns.append(self.windows[anchor_fn_idx])
+
+            for idx in range(negative_pairs.shape[0]):
+                negative_fn_idx = negative_fn_indices[idx]
+                negative_fns.append(self.windows[negative_fn_idx])
+            
+            anchor_fns = np.array(anchor_fns)
+            negative_fns = np.array(negative_fns)
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
 
         elif mode == 'test':
@@ -305,14 +337,19 @@ class ClassificationDataset(object):
                 data=data,
                 window_size=window_size,
             )
+            
             labels = convert_to_windows(data=labels, window_size=window_size)
             window_labels = []
+            
             for label in labels:
                 if np.sum(label) > 0:
                     window_labels.append(1)
                 else:
                     window_labels.append(0)
+            
             self.labels = np.array(window_labels).reshape(-1)
+        
+        return
 
     def __len__(self) -> int:
         return self.windows.shape[0]
