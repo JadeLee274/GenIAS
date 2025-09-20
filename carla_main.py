@@ -9,7 +9,7 @@ from data_factory.loader import *
 from carla.model import *
 from utils.loss import pretextloss, classificationloss, entropy
 from utils.metric import *
-from utils.fix_seed import fix_seed_all
+from utils.fix_seed import fix_seed
 from utils.set_logging import set_logging_filehandler
 
 
@@ -59,12 +59,13 @@ def pretext(
     subdata: Optional[str] = None,
     scheme: str = 'carla',
     shuffle_step: Optional[int] = None,
+    seed: Optional[int] = None,
     epochs: int = 30,
     batch_size: int = 50,
     learning_rate: float = 1e-3,
     gpu_num: int = 0,
     model_save_interval: int = 5,
-    num_neighbors: int = 2,
+    num_neighbors: int = 5,
 ) -> None:
     """
     Training code for pretext stage of CARLA.
@@ -114,6 +115,10 @@ def pretext(
         scheme=scheme,
         shuffle_step=shuffle_step
     )
+
+    if scheme == 'genias_multiple':
+        fix_seed(seed=seed, mode='torch')
+    
     data_dim = train_dataset.data_dim
     model = PretextModel(in_channels=data_dim, mid_channels=4)
 
@@ -222,67 +227,104 @@ def pretext(
     f'{index_searcher.d} != {reps.shape[1]}'
     index_searcher.add(reps)
 
-    anchor_and_negative_pairs = np.concatenate(
-        [train_dataset.anchors, train_dataset.negative_pairs],
-        axis=0,
-    )
+    # anchor_and_negative_pairs = np.concatenate(
+    #     [train_dataset.anchors, train_dataset.negative_pairs],
+    #     axis=0,
+    # )
 
     # Selecting nearest/furthest neighborhoods of the anchor.
-    nearest_neighbors = []
-    furthest_neighbors = []
+    # nearest_neighbors = []
+    # furthest_neighbors = []
+
+    # Selecting nearest/furthest indices of the anchor.
+    nearest_indices_list = []
+    furthest_indices_list = []
 
     for anchor_rep in anchor_reps:
         anchor_query = anchor_rep.reshape(1, -1)
         _, indices = index_searcher.search(anchor_query, reps.shape[0])
         indices = indices.reshape(-1)
-        nearest_indices = indices[1:num_neighbors + 1]
+        nearest_indices = indices[1: num_neighbors+1]
         furthest_indices = indices[-num_neighbors:]
-        nearest_neighbors.append(
-            anchor_and_negative_pairs[nearest_indices]
-        )
-        furthest_neighbors.append(
-            anchor_and_negative_pairs[furthest_indices]
-        )
+        # nearest_neighbors.append(
+        #     anchor_and_negative_pairs[nearest_indices]
+        # )
+        # furthest_neighbors.append(
+        #     anchor_and_negative_pairs[furthest_indices]
+        # )
+        nearest_indices_list.append(nearest_indices)
+        furthest_indices_list.append(furthest_indices)
     
     # Saving nearest/furthest neighborhoods of the anchor.
-    nearest_neighbors = np.array(nearest_neighbors)
-    furthest_neighbors = np.array(furthest_neighbors)
+    # nearest_neighbors = np.array(nearest_neighbors)
+    # furthest_neighbors = np.array(furthest_neighbors)
+    # np.save(
+    #     file=f'{classification_dir}/anchor_nns.npy',
+    #     arr=nearest_neighbors,
+    # )
+    # np.save(
+    #     file=f'{classification_dir}/anchor_fns.npy',
+    #     arr=furthest_neighbors,
+    # )
+
+    # Saving nearest/furthest indeces of the anchor.
+    nearest_indices_list = np.array(nearest_indices_list)
+    furthest_indices_list = np.array(furthest_indices_list)
     np.save(
-        file=f'{classification_dir}/anchor_nns.npy',
-        arr=nearest_neighbors,
+        file=f'{classification_dir}/anchor_nn_indices.npy',
+        arr=nearest_indices_list,
     )
     np.save(
-        file=f'{classification_dir}/anchor_fns.npy',
-        arr=furthest_neighbors,
+        file=f'{classification_dir}/anchor_fn_indices.npy',
+        arr=furthest_indices_list,
     )
 
-    # Selecting nearest/furthest neighborhoods of the negative pair.
-    nearest_neighbors = []
-    furthest_neighbors = []
+
+    # # Selecting nearest/furthest neighborhoods of the negative pair.
+    # nearest_neighbors = []
+    # furthest_neighbors = []
+
+    # Selecting nearest/furthest indices of the negative pair.
+    nearest_indices_list = []
+    furthest_indices_list = []
 
     for negative_rep in negative_reps:
         negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
-        nearest_indices = indices[1:num_neighbors + 1]
+        nearest_indices = indices[1: num_neighbors+1]
         furthest_indices = indices[-num_neighbors:]
-        nearest_neighbors.append(
-            anchor_and_negative_pairs[nearest_indices]
-        )
-        furthest_neighbors.append(
-            anchor_and_negative_pairs[furthest_indices]
-        )
+        # nearest_neighbors.append(
+        #     anchor_and_negative_pairs[nearest_indices]
+        # )
+        # furthest_neighbors.append(
+        #     anchor_and_negative_pairs[furthest_indices]
+        # )
+        nearest_indices_list.append(nearest_indices)
+        furthest_indices_list.append(furthest_indices)
     
-    # Saving nearest/furthest neighborhoods of the negative the pair.
-    nearest_neighbors = np.array(nearest_neighbors)
-    furthest_neighbors = np.array(furthest_neighbors)
+    # # Saving nearest/furthest neighborhoods of the negative the pair.
+    # nearest_neighbors = np.array(nearest_neighbors)
+    # furthest_neighbors = np.array(furthest_neighbors)
+    # np.save(
+    #     file=f'{classification_dir}/negative_nns.npy',
+    #     arr=nearest_neighbors,
+    # )
+    # np.save(
+    #     file=f'{classification_dir}/negative_fns.npy',
+    #     arr=furthest_neighbors,
+    # )
+
+    # Saving nearest/furthest indices of the negative pair.
+    nearest_indices_list = np.array(nearest_indices_list)
+    furthest_indices_list = np.array(furthest_indices_list)
     np.save(
-        file=f'{classification_dir}/negative_nns.npy',
-        arr=nearest_neighbors,
+        file=f'{classification_dir}/negative_nn_indices.npy',
+        arr=nearest_indices_list,
     )
     np.save(
-        file=f'{classification_dir}/negative_fns.npy',
-        arr=furthest_neighbors,
+        file=f'{classification_dir}/negative_fn_indices.npy',
+        arr=furthest_indices_list,
     )
 
     print('\nPretext stage done. Moving on to classification stage.\n')
@@ -503,7 +545,7 @@ if __name__ == "__main__":
     args.add_argument(
         '--dataset',
         type=str,
-        help="Dataset. Either 'MSL_SEPARATED' or 'SMAP_SEPARATED'",
+        help="Dataset.",
     )
     args.add_argument(
         '--pretext-scheme',
@@ -542,7 +584,11 @@ if __name__ == "__main__":
     )
     config = args.parse_args()
 
-    fix_seed_all(config.seed)
+    if config.pretext_scheme == 'genias_multiple':
+        fix_seed(seed=config.seed, mode='random')
+        fix_seed(seed=config.seed, mode='numpy')
+    else:
+        fix_seed(seed=config.seed, mode='all')
 
     log_dir = f'log/carla/{config.dataset}'
     os.makedirs(log_dir, exist_ok=True)

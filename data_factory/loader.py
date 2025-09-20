@@ -84,16 +84,18 @@ class PretextDataset(object):
         window_size: int = 200,
         scheme: str = 'carla',
         shuffle_step: Optional[int] = None,
+        num_pairs: Optional[int] = None,
     ) -> None:
         self.dataset = dataset
         self.subdata = subdata
         self.window_size = window_size
 
-        assert scheme in ['carla', 'genias', 'shuffle'], \
-        "scheme argument must be either 'carla', 'genias', 'shuffle'"
+        assert scheme in ['carla', 'genias', 'shuffle', 'genias_multiple'], \
+        "'carla', 'genias', 'shuffle', 'genias_multiple'"
 
         self.scheme = scheme
         self.shuffle_step = shuffle_step
+        self.num_pairs = num_pairs
 
         if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
             data_dir = f'data/{dataset}/train/{subdata}.npy'
@@ -243,6 +245,41 @@ class PretextDataset(object):
             
 
             self.positive_pairs = np.array(positive_pairs)
+            self.negative_pairs = np.array(negative_pairs)  
+
+        elif self.scheme == 'genias_multiple':
+            anomaly_injection = AnomalyInjection()
+
+            vae = VAE(
+                window_size=self.window_size,
+                data_dim=self.data_dim,
+                latent_dim=100,
+                depth=10,
+            )
+            vae.eval()
+
+            positive_pairs = []
+            negative_pairs = []
+
+            for idx in range(self.len):
+                positive_pair = []
+                negative_pair = []
+                anchor = self.anchors[idx]
+                anchor = torch.tensor(anchor).float()
+
+                for _ in range(self.num_pairs):
+                    _, _, x_hat, x_tilde = vae.forward(x=anchor)
+                    x_hat = x_hat.detach().numpy()
+                    x_tilde = x_tilde.detach().numpy()
+                    positive_pair.append(x_hat)
+                    negative_pair.append(x_tilde)
+                
+                positive_pair = np.array(positive_pair)
+                positive_pairs.append(positive_pair)
+                negative_pair = np.array(negative_pair)
+                negative_pairs.append(negative_pair)
+            
+            self.positive_pairs = np.array(positive_pairs)
             self.negative_pairs = np.array(negative_pairs)
 
         # Saving negetive pairs for classification stage.
@@ -317,12 +354,50 @@ class ClassificationDataset(object):
             )
             self.windows = np.concatenate([anchors, negative_pairs], axis=0)
 
-            anchor_nns = np.load(f'{classification_dir}/anchor_nns.npy')
-            negative_nns = np.load(f'{classification_dir}/negative_nns.npy')
+            # anchor_nns = np.load(f'{classification_dir}/anchor_nns.npy')
+            # negative_nns = np.load(f'{classification_dir}/negative_nns.npy')
+            anchor_nn_indices = np.load(
+                f'{classification_dir}/anchor_nn_indices.npy'
+            )
+            negative_nn_indices = np.load(
+                f'{classification_dir}/negative_nn_indices.npy'
+            )
+            anchor_nns = []
+            for idx in range(anchors.shape[0]):
+                anchor_nn_idx = anchor_nn_indices[idx]
+                anchor_nns.append(self.windows[anchor_nn_idx])
+            anchor_nns = np.array(anchor_nns)
+
+            negative_nns = []
+            for idx in range(negative_pairs.shape[0]):
+                negative_nn_idx = negative_nn_indices[idx]
+                negative_nns.append(self.windows[negative_nn_idx])
+            negative_nns = np.array(negative_nns)
+
             self.nns = np.concatenate([anchor_nns, negative_nns], axis=0)
 
-            anchor_fns = np.load(f'{classification_dir}/anchor_fns.npy')
-            negative_fns = np.load(f'{classification_dir}/negative_fns.npy')
+            # anchor_fns = np.load(f'{classification_dir}/anchor_fns.npy')
+            # negative_fns = np.load(f'{classification_dir}/negative_fns.npy')
+            
+            anchor_fn_indices = np.load(
+                f'{classification_dir}/anchor_fn_indices.npy'
+            )
+            negative_fn_indices = np.load(
+                f'{classification_dir}/negative_fn_indices.npy'
+            )
+
+            anchor_fns = []
+            for idx in range(anchors.shape[0]):
+                anchor_fn_idx = anchor_fn_indices[idx]
+                anchor_fns.append(self.windows[anchor_fn_idx])
+            anchor_fns = np.array(anchor_fns)
+
+            negative_fns = []
+            for idx in range(negative_pairs.shape[0]):
+                negative_fn_idx = negative_fn_indices[idx]
+                negative_fns.append(self.windows[negative_fn_idx])
+            negative_fns = np.array(negative_fns)
+
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
 
         elif mode == 'test':
