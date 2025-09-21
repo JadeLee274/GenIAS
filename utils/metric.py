@@ -2,7 +2,7 @@ from sklearn.metrics import precision_recall_curve, auc
 from utils.common_import import *
 from data_factory.loader import ClassificationDataset
 from carla.model import ClassificationModel
-from utils.fix_seed import fix_seed_all
+from utils.fix_seed import seed_fix
 
 
 ######################### Metrics for CARLA inference ######################### 
@@ -119,20 +119,26 @@ def auc_pr_statistics(auc_pr_list: List[float]) -> Tuple[float, float]:
     return auc_pr_mean, auc_pr_std
 
 
-def inference(dataset: str, gpu_num: int, pretext_scheme: str) -> None:
+def inference(
+    dataset: str,
+    gpu_num: int,
+    pretext_scheme: str,
+    seed: int = 42,
+) -> None:
     """
     If you only want to infer scores with pre-trained models, by using this 
     function, you can get informations on F1 scores, AUC-PR.
 
     Parameters:
-        dataset: Name of dataset.
-        gpu_num: The inference will be done on this GPU.
+        dataset:        Name of dataset.
+        gpu_num:        The inference will be done on this GPU.
         pretext_scheme: What scheme was applied for pretext.
+        seed:           The seed will be fixed. Default 42.
     """
     assert pretext_scheme in ['carla', 'genias', 'shuffle'], \
     "pretext_scheme must be either 'carla', 'genias', 'shuffle'"
 
-    fix_seed_all(42)
+    fix_seed(sedd=seed, mode='all')
 
     device = torch.device(f'cuda:{gpu_num}')
 
@@ -242,6 +248,26 @@ def inference(dataset: str, gpu_num: int, pretext_scheme: str) -> None:
     print(f'- Macro F1: {round(f1_macro, 4)}')
 
     return
+
+
+def point_adjustment(pred: Vector, gt: Vector) -> Vector:
+    assert len(pred) == len(gt), \
+    f"length of pred {len(pred)} and length of gt {len(gt)} mismatch"
+
+    for i in range(len(pred)):
+        if pred[i] == 1 and gt[i] == 1:
+            for j in range(i, len(gt)):
+                if pred[j] == 0 and gt[j] == 1:
+                    pred[j] = 1
+                elif pred[j] == 1:
+                    break
+            for k in range(i, 0, -1):
+                if pred[k] == 0 and gt[k] == 1:
+                    pred[k] = 1
+                elif pred[k] == 1:
+                    break
+    
+    return pred
 
 
 ####################### Metrics for anomaly generation ####################### 

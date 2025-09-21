@@ -9,7 +9,7 @@ from data_factory.loader import *
 from carla.model import *
 from utils.loss import pretextloss, classificationloss, entropy
 from utils.metric import *
-from utils.fix_seed import fix_seed
+from utils.fix_seed import seed_fix
 from utils.set_logging import set_logging_filehandler
 
 
@@ -117,7 +117,7 @@ def pretext(
     )
 
     if scheme == 'genias_multiple':
-        fix_seed(seed=seed, mode='torch')
+        seed_fix(seed=seed, mode='torch')
     
     data_dim = train_dataset.data_dim
     model = PretextModel(in_channels=data_dim, mid_channels=4)
@@ -585,10 +585,10 @@ if __name__ == "__main__":
     config = args.parse_args()
 
     if config.pretext_scheme == 'genias_multiple':
-        fix_seed(seed=config.seed, mode='random')
-        fix_seed(seed=config.seed, mode='numpy')
+        seed_fix(seed=config.seed, mode='random')
+        seed_fix(seed=config.seed, mode='numpy')
     else:
-        fix_seed(seed=config.seed, mode='all')
+        seed_fix(seed=config.seed, mode='all')
 
     log_dir = f'log/carla/{config.dataset}'
     os.makedirs(log_dir, exist_ok=True)

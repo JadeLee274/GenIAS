@@ -2,7 +2,7 @@ import random
 import numpy as np
 import torch
 
-def fix_seed(seed: int = 42, mode: str = 'all') -> None:
+def seed_fix(seed: int = 42, mode: str = 'all') -> None:
     '''
     Fix seed for experiment reproduction. (random, numpy, torch)
 
@@ -20,6 +20,6 @@ def fix_seed(seed: int = 42, mode: str = 'all') -> None:
     elif mode == 'all':
         random.seed(seed)
         np.random.seed(seed)
-        torch.random.seed(seed)
+        torch.manual_seed(seed)
         torch.backends.cudnn.deterministic = True
     return None
