@@ -84,7 +84,7 @@ class PretextDataset(object):
         window_size: int = 200,
         scheme: str = 'carla',
         shuffle_step: Optional[int] = None,
-        num_pairs: Optional[int] = None,
+        num_pairs: int = 3,
     ) -> None:
         self.dataset = dataset
         self.subdata = subdata
@@ -110,185 +110,129 @@ class PretextDataset(object):
         )
         self.len = self.anchors.shape[0]
 
-        patch_coef = 0.05 # other options include 0.1 and 0.6
+        # Get positive pairs
+        positive_pairs = []
 
-        if dataset == 'MSL':
-            patch_coef = 0.4
-        elif dataset in ['SMAP', 'Yahoo']:
-            patch_coef = 0.2
+        for idx in range(self.anchors.shape[0]):
+            if idx < 10:
+                positive_pair = self.anchors[idx]
+                positive_pair = noise_transformation(positive_pair)
+            else:
+                random_idx = np.random.randint(idx - 10, idx)
+                positive_pair = self.anchors[random_idx]
 
-        self.get_pairs(patch_coef=patch_coef)
+            positive_pairs.append(positive_pair)
+        
+        self.positive_pairs = np.array(positive_pairs)
+
+        # Get negative pairs
+        self._get_negative_pairs()
     
     def __len__(self) -> int:
         return self.anchors.shape[0]
     
     def __getitem__(self, idx: int) -> Tuple[Matrix, Matrix, Matrix]:
-            anchor = self.anchors[idx]
-            positive = self.positive_pairs[idx]
-            negative = self.negative_pairs[idx]
+        anchor = self.anchors[idx]
+        positive = self.positive_pairs[idx]
+        negative = self.negative_pairs[idx]
 
-            anchor = (anchor - self.mean) / self.std
-            positive = (positive - self.mean) / self.std
-            negative = (negative - self.mean) / self.std 
+        anchor = (anchor - self.mean) / self.std
+        positive = (positive - self.mean) / self.std
+        negative = (negative - self.mean) / self.std 
 
-            return anchor, positive, negative
+        return anchor, positive, negative
     
-    def get_pairs(self, patch_coef: float) -> None:
-        negative_save_dir = f'classification_dataset/{self.dataset}'
+    def _get_negative_pairs(self) -> None:        
+        # Negative pair generation algorithm for CARLA        
+        anomaly_injection = AnomalyInjection()
 
-        if self.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-            negative_save_dir = f'{negative_save_dir}/{self.subdata}'
+        # Preparing VAE for negative pair generation for GenIAS
+        vae = VAE(
+            window_size=self.window_size,
+            data_dim=self.data_dim,
+            latent_dim=100,
+            depth=10,
+        )
+        vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
+        vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
+        vae.load_state_dict(vae_ckpt['model'])
+        vae.eval()
+
+        patch_coef = 0.05 # other options include 0.1 and 0.6
+
+        if self.dataset == 'MSL':
+            patch_coef = 0.4
+        elif self.dataset in ['SMAP', 'Yahoo']:
+            patch_coef = 0.2
         
-        if self.scheme == 'carla':
-            positive_pairs = []
+        # Prepare negative pairs
+        negative_pairs = []
+        for idx in range(self.anchors.shape[0]):
+            anchor = self.anchors[idx]
 
-            for idx in range(self.anchors.shape[0]):
-                if idx < 10:
-                    positive_pair = self.anchors[idx]
-                    positive_pair = noise_transformation(positive_pair)
-                else:
-                    random_idx = np.random.randint(idx - 10, idx)
-                    positive_pair = self.anchors[random_idx]
-
-                positive_pairs.append(positive_pair)
-            
-            self.positive_pairs = np.array(positive_pairs)
-
-            negative_pairs = []
-            anomaly_injection = AnomalyInjection()
-
-            for idx in range(self.anchors.shape[0]):
-                negative_pair = self.anchors[idx]
-                negative_pair = anomaly_injection(negative_pair)
+            if self.scheme == 'carla':
+                negative_pair = anomaly_injection(anchor)
                 negative_pairs.append(negative_pair)
             
-            self.negative_pairs = np.array(negative_pairs)           
-
-        elif self.scheme == 'genias':
-            # Anomaly injection scheme for CARLA
-            anomaly_injection = AnomalyInjection()
-
-            # Anomaly injection scheme for GenIAS
-            vae = VAE(
-                window_size=self.window_size,
-                data_dim=self.data_dim,
-                latent_dim=100,
-                depth=10,
-            )
-            vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
-            vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
-            vae.load_state_dict(vae_ckpt['model'])
-            vae.eval()
-
-            positive_pairs = []
-            negative_pairs = []
-            
-            for idx in range(self.anchors.shape[0]):
-                anchor = self.anchors[idx]
-                _, _, positive_pair, negative_pair = \
-                vae.forward(torch.tensor(anchor).float().unsqueeze(0))
-                positive_pair = positive_pair.detach().squeeze(0).numpy()
+            elif self.scheme == 'genias':
+                _, _, _, negative_pair = vae.forward(
+                    torch.tensor(anchor).float().unsqueeze(0)
+                )
                 negative_pair = negative_pair.detach().squeeze(0).numpy()
                 negative_pair = patch(
                     x=anchor,
                     x_tilde=negative_pair,
                     tau=patch_coef,
                 )
-                positive_pairs.append(positive_pair)
                 negative_pairs.append(negative_pair)
             
-            self.positive_pairs = np.array(positive_pairs)
-            self.negative_pairs = np.array(negative_pairs)
-
-        elif self.scheme == 'shuffle':
-            anomaly_injection = AnomalyInjection()
-
-            vae = VAE(
-                window_size=self.window_size,
-                data_dim=self.data_dim,
-                latent_dim=100,
-                depth=10,
-            )
-            vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
-            vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
-            vae.load_state_dict(vae_ckpt['model'])
-            vae.eval()
-
-            positive_pairs = []
-            negative_pairs = []
-
-            for idx in range(self.len):
-                anchor = self.anchors[idx]
-
+            elif self.scheme == 'shuffle':
                 idx_mod_step = idx // self.shuffle_step
                 idx_mode = idx_mod_step // 2
                 
                 if idx_mode == 0: # CARLA scheme applied
                     negative_pair = anomaly_injection(x=anchor)
-
-                    if idx < 10:
-                        positive_pair = noise_transformation(anchor)
-                    else:
-                        random_idx = np.random.randint(idx - 10, idx)
                     
                 elif idx_mode == 1: # GenIAS scheme applied
-                    anchor_tp = torch.tensor(
-                        data=anchor,
-                        dtype=torch.float32
-                    ).unsqueeze(0)
-                    _, _, positive_pair, negative_pair = vae.forward(anchor_tp)
-                    positive_pair = positive_pair.squeeze(0).detach().numpy()
+                    _, _, _, negative_pair = vae.forward(
+                        torch.tensor(anchor).float().unsqueeze(0)
+                    )
                     negative_pair = negative_pair.squeeze(0).detach().numpy()
-                
-                positive_pairs.append(positive_pair)
+                    negative_pair = patch(
+                        x=anchor,
+                        x_tilde=negative_pair,
+                        tau=patch_coef,
+                    )
+            
                 negative_pairs.append(negative_pair)
             
-
-            self.positive_pairs = np.array(positive_pairs)
-            self.negative_pairs = np.array(negative_pairs)  
-
-        elif self.scheme == 'genias_multiple':
-            anomaly_injection = AnomalyInjection()
-
-            vae = VAE(
-                window_size=self.window_size,
-                data_dim=self.data_dim,
-                latent_dim=100,
-                depth=10,
-            )
-            vae.eval()
-
-            positive_pairs = []
-            negative_pairs = []
-
-            for idx in range(self.len):
-                positive_pair = []
+            elif self.scheme == 'genias_multiple':
                 negative_pair = []
-                anchor = self.anchors[idx]
-                anchor = torch.tensor(anchor).float()
 
                 for _ in range(self.num_pairs):
-                    _, _, x_hat, x_tilde = vae.forward(x=anchor)
-                    x_hat = x_hat.detach().numpy()
-                    x_tilde = x_tilde.detach().numpy()
-                    positive_pair.append(x_hat)
+                    _, _, _, x_tilde = vae.forward(
+                        torch.tensor(anchor).float().unsqueeze(0)
+                    )
+                    x_tilde = x_tilde.detach().squeeze(0).numpy()
                     negative_pair.append(x_tilde)
                 
-                positive_pair = np.array(positive_pair)
-                positive_pairs.append(positive_pair)
                 negative_pair = np.array(negative_pair)
                 negative_pairs.append(negative_pair)
-            
-            self.positive_pairs = np.array(positive_pairs)
-            self.negative_pairs = np.array(negative_pairs)
+                
+        self.negative_pairs = np.array(negative_pairs)
 
         # Saving negetive pairs for classification stage.
+        negative_save_dir = f'classification_dataset/{self.dataset}'
+
+        if self.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+            negative_save_dir = f'{negative_save_dir}/{self.subdata}'
+
         negative_save_dir = f'{negative_save_dir}/{self.scheme}'
         os.makedirs(negative_save_dir, exist_ok=True)
 
         np.save(
             file=f'{negative_save_dir}/negative_pairs.npy',
-            arr=self.negative_pairs
+            arr=self.negative_pairs,
         )
 
         return
@@ -302,6 +246,7 @@ class ClassificationDataset(object):
         window_size: int = 200,
         mode: str = 'train',
         pretext_scheme: str = 'carla',
+        num_pairs: int = 3,
     ) -> None:
         self.dataset = dataset
         self.subdata = subdata
@@ -309,8 +254,8 @@ class ClassificationDataset(object):
         assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
         self.mode = mode
 
-        assert pretext_scheme in ['carla', 'genias', 'shuffle'], \
-        "pretext_scheme must be 'carla', 'genias', of 'shuffle'"
+        assert pretext_scheme in ['carla', 'genias', 'shuffle', 'genias_multiple'], \
+        "'carla', 'genias', 'shuffle', 'genias_multiple'"
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
             data_dir = f'data/{dataset}'
@@ -352,10 +297,20 @@ class ClassificationDataset(object):
             negative_pairs = np.load(
                 f'{classification_dir}/negative_pairs.npy'
             )
-            self.windows = np.concatenate([anchors, negative_pairs], axis=0)
+            if pretext_scheme == 'genias_multiple':
+                windows = []
+                for idx in range(anchors.shape[0]):
+                    windows.append(anchors[idx])
+                for idx in range(negative_pairs.shape[0]):
+                    nega_1, nega_2, nega_3 = np.split(negative_pairs[idx], 3)
+                    windows.append(nega_1.squeeze(0))
+                    windows.append(nega_2.squeeze(0))
+                    windows.append(nega_3.squeeze(0))
+                self.windows = np.array(windows)
+            
+            else:
+                self.windows = np.concatenate([anchors, negative_pairs], axis=0)
 
-            # anchor_nns = np.load(f'{classification_dir}/anchor_nns.npy')
-            # negative_nns = np.load(f'{classification_dir}/negative_nns.npy')
             anchor_nn_indices = np.load(
                 f'{classification_dir}/anchor_nn_indices.npy'
             )
@@ -363,21 +318,30 @@ class ClassificationDataset(object):
                 f'{classification_dir}/negative_nn_indices.npy'
             )
             anchor_nns = []
+            
             for idx in range(anchors.shape[0]):
                 anchor_nn_idx = anchor_nn_indices[idx]
+                anchor_nn_idx = np.random.choice(anchor_nn_idx) # newley added for experimental purpose
                 anchor_nns.append(self.windows[anchor_nn_idx])
+            
             anchor_nns = np.array(anchor_nns)
 
             negative_nns = []
-            for idx in range(negative_pairs.shape[0]):
-                negative_nn_idx = negative_nn_indices[idx]
-                negative_nns.append(self.windows[negative_nn_idx])
+            
+            if pretext_scheme == 'genias_multiple':
+                for idx in range(negative_pairs.shape[0] * num_pairs):
+                    negative_nn_idx = negative_nn_indices[idx]
+                    negative_nn_idx = np.random.choice(negative_nn_idx)
+                    negative_nns.append(self.windows[negative_nn_idx])
+            else:
+                for idx in range(negative_pairs.shape[0]):
+                    negative_nn_idx = negative_nn_indices[idx]
+                    negative_nn_idx = np.random.choice(negative_nn_idx) # newley added for experimental purpose
+                    negative_nns.append(self.windows[negative_nn_idx])
+
             negative_nns = np.array(negative_nns)
 
             self.nns = np.concatenate([anchor_nns, negative_nns], axis=0)
-
-            # anchor_fns = np.load(f'{classification_dir}/anchor_fns.npy')
-            # negative_fns = np.load(f'{classification_dir}/negative_fns.npy')
             
             anchor_fn_indices = np.load(
                 f'{classification_dir}/anchor_fn_indices.npy'
@@ -387,15 +351,27 @@ class ClassificationDataset(object):
             )
 
             anchor_fns = []
+
             for idx in range(anchors.shape[0]):
                 anchor_fn_idx = anchor_fn_indices[idx]
+                anchor_fn_idx = np.random.choice(anchor_fn_idx) # newley added for experimental purpose
                 anchor_fns.append(self.windows[anchor_fn_idx])
+
             anchor_fns = np.array(anchor_fns)
 
             negative_fns = []
-            for idx in range(negative_pairs.shape[0]):
-                negative_fn_idx = negative_fn_indices[idx]
-                negative_fns.append(self.windows[negative_fn_idx])
+            
+            if pretext_scheme == 'genias_multiple':
+                for idx in range(negative_pairs.shape[0] * num_pairs):
+                    negative_fn_idx = negative_fn_indices[idx]
+                    negative_fn_idx = np.random.choice(negative_fn_idx)
+                    negative_fns.append(self.windows[negative_fn_idx])
+            else:
+                for idx in range(negative_pairs.shape[0]):
+                    negative_fn_idx = negative_fn_indices[idx]
+                    negative_fn_idx = np.random.choice(negative_fn_idx) # newley added for experimental purpose
+                    negative_fns.append(self.windows[negative_fn_idx])
+                    
             negative_fns = np.array(negative_fns)
 
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
@@ -413,6 +389,7 @@ class ClassificationDataset(object):
                     window_labels.append(0)
             self.labels = np.array(window_labels).reshape(-1)
 
+        return
 
     def __len__(self) -> int:
         return self.windows.shape[0]
@@ -420,7 +397,7 @@ class ClassificationDataset(object):
     def __getitem__(
         self,
         idx: int
-    ) -> Union[Tuple[Matrix, Array, Array], Tuple[Matrix, int]]:
+    ) -> Union[Tuple[Matrix, Array, Array], Matrix]:
         if self.mode == 'train':
             window = self.windows[idx]
             nearest_neighbor = self.nns[idx]
