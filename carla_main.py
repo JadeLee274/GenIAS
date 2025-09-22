@@ -40,7 +40,7 @@ def cosine_schedule(
         current_epoch:         Current training epoch.
         total_epochs:          Total training epochs. Default 30.
         initial_learning_rate: Initial learning rate. Defalut 1e-3.
-        lr_dacay_rate:         Decay rate of initial learning rate. 
+        lr_dacay_rate:         Decay rate of initial learning rate.
                                Default 0.01.
     """
     eta_min = initial_learning_rate * (lr_decay_rate ** 3)
@@ -83,14 +83,15 @@ def pretext(
         model_save_inderval: The pretext model is saved once in this epoch.
                              Default 5.
         num_neighbors:       The number of nearest/furthest neighbors that will
-                             be saved after the pretext training. Default 2.
+                             be saved after the pretext training. Default 5.
 
     Examples:
-    >>> If dataset is 'MSL', then it consists of 27 subdata, C-1, C-2, ..., 
+
+    - If dataset is 'MSL', then it consists of 27 subdata, C-1, C-2, ..., 
     T-9, T-12, T-13. For training on C-1, write C-1 as subdata. This holds
     similarly for 'SMAP', 'SMD', 'Yahoo-A1', 'KPI'.
 
-    >>> If dataset is 'SWaT' or 'WADI', then don't write anything for subdata
+    - If dataset is 'SWaT' or 'WADI', then don't write anything for subdata
     argument.
 
     Pretext model consists of Resnet and mlp head to map anchor, positive pair,
@@ -104,8 +105,8 @@ def pretext(
     The model is saved once in a model_save_interval epochs, in order to be
     used for the self-supervised stage of CARLA.
     """
-    assert scheme in ['carla', 'genias', 'shuffle'], \
-    "scheme argument must be 'carla', 'genias', 'shuffle'"
+    assert scheme in ['carla', 'genias', 'shuffle', 'genias_multiple'], \
+    "'carla', 'genias', 'shuffle', 'genias_multiple'"
 
     print(f'Pretext training on {dataset} {subdata} start...\n')
 
@@ -131,10 +132,7 @@ def pretext(
         batch_size=batch_size,
         shuffle=True,
     )
-    optimizer = optim.Adam(
-        params=model.parameters(),
-        lr=learning_rate,
-    )
+    optimizer = optim.Adam(params=model.parameters(), lr=learning_rate)
 
     ckpt_dir = f'checkpoints/pretext/{dataset}'
     classification_dir = f'classification_dataset/{dataset}'
@@ -164,17 +162,35 @@ def pretext(
             positive_pair = positive_pair.to(device)
             negative_pair = negative_pair.to(device)
 
-            triplets = torch.cat(
-                tensors=[anchor, positive_pair, negative_pair],
-                dim=0
-            ).float()
+            if scheme == 'genias_multiple':
+                loss = torch.zeros(1, requires_grad=True).float().to(device)
+                for i in range(negative_pair.shape[1]):
+                    negative_pair_i = negative_pair[:, i]
+                    triplets_i = torch.cat(
+                        tensors=[anchor, positive_pair, negative_pair_i],
+                        dim=0,
+                    ).float()
+                    triplets_i = triplets_i.view(3 * B, F, W)
+                    representations_i = model.forward(triplets_i)
+                    loss_i = criterion(
+                        representations=representations_i,
+                        current_loss=prev_loss,
+                    )
+                loss += loss_i
+            
+            else:
+                triplets = torch.cat(
+                    tensors=[anchor, positive_pair, negative_pair],
+                    dim=0
+                ).float()
 
-            triplets = triplets.view(3 * B, F, W)
-            representations = model(triplets)
-            loss = criterion(
-                representations=representations,
-                current_loss=prev_loss,
-            )
+                triplets = triplets.view(3 * B, F, W)
+                representations = model.forward(triplets)
+                loss = criterion(
+                    representations=representations,
+                    current_loss=prev_loss,
+                )
+            
             loss.backward()
             optimizer.step()
             prev_loss = loss.item()
@@ -211,11 +227,19 @@ def pretext(
     for batch in timeseries_loader:
         anchor, _, negative_pair = batch
         anchor = anchor.to(device).float().transpose(-2, -1)
-        negative_pair = negative_pair.to(device).float().transpose(-2, -1)
         anchor_rep = model.forward(anchor).detach().cpu()
-        negative_rep = model.forward(negative_pair).detach().cpu()
         anchor_reps.append(anchor_rep)
-        negative_reps.append(negative_rep)
+
+        if scheme == 'genias_multiple':
+            for i in range(negative_pair.shape[1]):
+                negative_pair_i = negative_pair[:, i].float().transpose(-2, -1)
+                negative_pair_i = negative_pair_i.to(device)
+                negative_rep_i = model.forward(negative_pair_i).detach().cpu()
+                negative_reps.append(negative_rep_i)
+        else:
+            negative_pair = negative_pair.to(device).float().transpose(-2, -1)
+            negative_rep = model.forward(negative_pair).detach().cpu()
+            negative_reps.append(negative_rep)
     
     anchor_reps = torch.cat(anchor_reps, dim=0).numpy()
     negative_reps = torch.cat(negative_reps, dim=0).numpy()
@@ -227,16 +251,6 @@ def pretext(
     f'{index_searcher.d} != {reps.shape[1]}'
     index_searcher.add(reps)
 
-    # anchor_and_negative_pairs = np.concatenate(
-    #     [train_dataset.anchors, train_dataset.negative_pairs],
-    #     axis=0,
-    # )
-
-    # Selecting nearest/furthest neighborhoods of the anchor.
-    # nearest_neighbors = []
-    # furthest_neighbors = []
-
-    # Selecting nearest/furthest indices of the anchor.
     nearest_indices_list = []
     furthest_indices_list = []
 
@@ -246,27 +260,9 @@ def pretext(
         indices = indices.reshape(-1)
         nearest_indices = indices[1: num_neighbors+1]
         furthest_indices = indices[-num_neighbors:]
-        # nearest_neighbors.append(
-        #     anchor_and_negative_pairs[nearest_indices]
-        # )
-        # furthest_neighbors.append(
-        #     anchor_and_negative_pairs[furthest_indices]
-        # )
         nearest_indices_list.append(nearest_indices)
         furthest_indices_list.append(furthest_indices)
     
-    # Saving nearest/furthest neighborhoods of the anchor.
-    # nearest_neighbors = np.array(nearest_neighbors)
-    # furthest_neighbors = np.array(furthest_neighbors)
-    # np.save(
-    #     file=f'{classification_dir}/anchor_nns.npy',
-    #     arr=nearest_neighbors,
-    # )
-    # np.save(
-    #     file=f'{classification_dir}/anchor_fns.npy',
-    #     arr=furthest_neighbors,
-    # )
-
     # Saving nearest/furthest indeces of the anchor.
     nearest_indices_list = np.array(nearest_indices_list)
     furthest_indices_list = np.array(furthest_indices_list)
@@ -279,11 +275,6 @@ def pretext(
         arr=furthest_indices_list,
     )
 
-
-    # # Selecting nearest/furthest neighborhoods of the negative pair.
-    # nearest_neighbors = []
-    # furthest_neighbors = []
-
     # Selecting nearest/furthest indices of the negative pair.
     nearest_indices_list = []
     furthest_indices_list = []
@@ -294,26 +285,8 @@ def pretext(
         indices = indices.reshape(-1)
         nearest_indices = indices[1: num_neighbors+1]
         furthest_indices = indices[-num_neighbors:]
-        # nearest_neighbors.append(
-        #     anchor_and_negative_pairs[nearest_indices]
-        # )
-        # furthest_neighbors.append(
-        #     anchor_and_negative_pairs[furthest_indices]
-        # )
         nearest_indices_list.append(nearest_indices)
         furthest_indices_list.append(furthest_indices)
-    
-    # # Saving nearest/furthest neighborhoods of the negative the pair.
-    # nearest_neighbors = np.array(nearest_neighbors)
-    # furthest_neighbors = np.array(furthest_neighbors)
-    # np.save(
-    #     file=f'{classification_dir}/negative_nns.npy',
-    #     arr=nearest_neighbors,
-    # )
-    # np.save(
-    #     file=f'{classification_dir}/negative_fns.npy',
-    #     arr=furthest_neighbors,
-    # )
 
     # Saving nearest/furthest indices of the negative pair.
     nearest_indices_list = np.array(nearest_indices_list)
@@ -413,26 +386,39 @@ def classification(
             batch_consistency = 0.0
             batch_inconsistency = 0.0
 
-            for i in range(nearest_neighbor.shape[1]):
-                nearest = nearest_neighbor[:, i].transpose(-2, -1)
-                furthest = furthest_neighbor[:, i].transpose(-2, -1)
+            # for i in range(nearest_neighbor.shape[1]):
+            #     nearest = nearest_neighbor[:, i].transpose(-2, -1)
+            #     furthest = furthest_neighbor[:, i].transpose(-2, -1)
 
-                nearest_logit = model.forward(nearest)
-                furthest_logit = model.forward(furthest)
+            #     nearest_logit = model.forward(nearest.transpose(-2, -1)
+            #     furthest_logit = model.forward(furthest.transpose(-2, -1))
 
-                consistency_sum, consistency, inconsistency \
-                = criterion(
-                    window_logit=window_logit,
-                    nearest_logit=nearest_logit,
-                    furthest_logit=furthest_logit,
-                )
-                
-                batch_consistency_sum += consistency_sum
-                batch_consistency += consistency
-                batch_inconsistency += inconsistency
+            #     consistency_sum, consistency, inconsistency \
+            #     = criterion(
+            #         window_logit=window_logit,
+            #         nearest_logit=nearest_logit,
+            #         furthest_logit=furthest_logit,
+            #     )
+
+            #     batch_consistency_sum += consistency_sum
+            #     batch_consistency += consisistency
+            #     batch_inconsistency += inconsistency
+
+            nearest_logit = model.forward(nearest_neighbor.transpose(-2, -1))
+            furthest_logit = model.forward(furthest_neighbor.transpose(-2, -1))
+
+            consistency_sum, consistency, inconsistency \
+            = criterion(
+                window_logit=window_logit,
+                nearest_logit=nearest_logit,
+                furthest_logit=furthest_logit,
+            )
+            
+            batch_consistency_sum += consistency_sum
+            batch_consistency += consistency
+            batch_inconsistency += inconsistency
             
             batch_loss += batch_consistency_sum
-
             epoch_consistency_loss += batch_consistency
             epoch_inconsistency_loss += batch_inconsistency
 
@@ -615,6 +601,7 @@ if __name__ == "__main__":
                 subdata=subdata,
                 scheme=config.pretext_scheme,
                 shuffle_step=config.pretext_shuffle_step,
+                seed=config.seed,
                 gpu_num=config.gpu_num,
             )
             best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
