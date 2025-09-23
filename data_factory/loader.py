@@ -68,20 +68,22 @@ class PretextDataset(object):
         dataset: str,
         subdata: Optional[str] = None,
         window_size: int = 200,
-        use_genias: bool = False,
+        scheme: str = 'carla',
     ) -> None:
         self.dataset = dataset
         self.subdata = subdata
         self.window_size = window_size
-        self.use_genias = use_genias
+        self.scheme = scheme
 
-        if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_dir = os.path.join('data', dataset, 'train', f'{subdata}.npy')
+        data_dir = os.path.join('data', dataset)
+
+        if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+            data_dir = os.path.join(data_dir, 'train', f'{subdata}.npy')
             self.data = np.load(data_dir)
             self.data_dim = self.data.shape[-1]
 
         elif dataset == 'SWaT':
-            data_dir = os.path.join('data', dataset, 'SWaT_Normal.csv')
+            data_dir = os.path.join(data_dir, 'SWaT_Normal.csv')
             data = pd.read_csv(data_dir)
             data.drop(columns=[' Timestamp', 'Normal/Attack'], inplace=True)
             self.data = data.values[:, 1:]
@@ -94,14 +96,22 @@ class PretextDataset(object):
             window_size=window_size
         )
 
-        patch_coef = 0.5 # Another options are 0.1, 0.2, 0.4, 0.6
+        # Get positive pairs
+        positive_pairs = []
 
-        if dataset == 'MSL':
-            patch_coef = 0.4
-        elif dataset in ['SMAP', 'Yahoo']:
-            patch_coef = 0.2
+        for idx in range(self.anchors.shape[0]):
+            if idx < 10:
+                positive_pair = self.anchors[idx]
+                positive_pair = noise_transformation(positive_pair)
+            else:
+                random_idx = np.random.randint(idx - 10, idx)
+                positive_pair = self.anchors[random_idx]
+            positive_pairs.append(positive_pair)
+        
+        self.positive_pairs = np.array(positive_pairs)
 
-        self.get_pairs(patch_coef=patch_coef)
+        # Get negative pairs
+        self._get_negative_pairs()
 
         return
     
@@ -119,90 +129,62 @@ class PretextDataset(object):
 
         return anchor, positive, negative
     
-    def get_pairs(self, patch_coef: float) -> None:
+    def _get_negative_pairs(self) -> None:
         negative_dir = os.path.join('classification_dataset', self.dataset)
-        vae_dir = os.path.join('checkpoints/vae', self.dataset)
+        vae_dir = os.path.join('checkpoints', 'vae', self.dataset)
+        
+        if self.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+            negative_dir = os.path.join(negative_dir, self.subdata)
+            vae_dir = os.path.join(vae_dir,  self.subdata)
+        
+        negative_dir = os.path.join(negative_dir, self.scheme)
+        os.makedirs(negative_dir, exist_ok=True)
 
-        if self.use_genias:
+        negative_pairs = []
+
+        if self.scheme == 'carla':
+            anomaly_injection = AnomalyInjection()
+            for anchor in self.anchors:
+                negative_pair = anomaly_injection(anchor)
+                negative_pairs.append(negative_pair)
+
+        elif self.scheme == 'genias':
             vae = VAE(
                 window_size=self.window_size,
                 data_dim=self.data_dim,
                 latent_dim=100,
                 depth=10,
             )
-            vae_dir = os.path.join('checkpoints/vae', self.dataset)
-
-            if self.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-                vae_dir = os.path.join(vae_dir, self.subdata)
             
             vae_ckpt = torch.load(os.path.join(vae_dir, 'epoch_1000.pt'))
             vae.load_state_dict(vae_ckpt['model'])
             vae.eval()
 
-            positive_pairs = []
+            patch_coef = np.random.choice([0.05, 0.1, 0.2, 0.4, 0.6])
+
+            if self.dataset == 'MSL':
+                patch_coef = 0.4
+            elif self.dataset in ['SMAP', 'Yahoo']:
+                patch_coef = 0.2
+
             negative_pairs = []
             
-            for idx in range(self.anchors.shape[0]):
-                anchor = self.anchors[idx]
-                _, _, positive_pair, negative_pair = \
-                vae.forward(torch.tensor(anchor).float().unsqueeze(0))
-                positive_pair = positive_pair.detach().squeeze(0).numpy()
+            for anchor in self.anchors:
+                anchor = torch.tensor(anchor).float()
+                negative_pair = vae.forward(anchor.unsqueeze(0))[-1]
                 negative_pair = negative_pair.detach().squeeze(0).numpy()
                 negative_pair = patch(
                     x=anchor,
                     x_tilde=negative_pair,
                     tau=patch_coef,
                 )
-                positive_pairs.append(positive_pair)
                 negative_pairs.append(negative_pair)
             
-            self.positive_pairs = np.array(positive_pairs)
-            self.negative_pairs = np.array(negative_pairs)
-
-            # Saving negetive pairs for classification stage.
-            negative_save_dir = os.path.join(
-                negative_dir, self.subdata, 'use_genias',
-            )
-            os.makedirs(negative_save_dir, exist_ok=True)
-            np.save(
-                file=os.path.join(negative_save_dir, 'negative_pairs.npy'),
-                arr=self.negative_pairs
-            )
-
-        else:
-            positive_pairs = []
-
-            for idx in range(self.anchors.shape[0]):
-                if idx < 10:
-                    positive_pair = self.anchors[idx]
-                    positive_pair = noise_transformation(positive_pair)
-                else:
-                    random_idx = np.random.randint(idx - 10, idx)
-                    positive_pair = self.anchors[random_idx]
-
-                positive_pairs.append(positive_pair)
-            
-            self.positive_pairs = np.array(positive_pairs)
-
-            negative_pairs = []
-            anomaly_injection = AnomalyInjection()
-
-            for idx in range(self.anchors.shape[0]):
-                negative_pair = self.anchors[idx]
-                negative_pair = anomaly_injection(negative_pair)
-                negative_pairs.append(negative_pair)
-            
-            self.negative_pairs = np.array(negative_pairs)
-            
-            # Saving negative pairs for classification stage.
-            negative_save_dir = os.path.join(
-                negative_dir, self.subdata, 'without_genias',
-            )
-            os.makedirs(negative_save_dir, exist_ok=True)
-            np.save(
-                file=os.path.join(negative_save_dir, 'negative_pairs.npy'),
-                arr=self.negative_pairs
-            )
+        self.negative_pairs = np.array(negative_pairs)
+        np.save(
+            file=os.path.join(negative_dir, 'negative_pairs.npy'),
+            arr=self.negative_pairs
+        )
 
         return
 
@@ -230,11 +212,11 @@ class ClassificationDataset(object):
         subdata: str,
         window_size: int = 200,
         mode: str = 'train',
-        use_genias: bool = False,
+        scheme: str = 'carla',
+        neighborhood_choice: str = 'random_choice',
     ) -> None:
         self.dataset = dataset
         self.subdata = subdata
-
         assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
         self.mode = mode
         
@@ -271,27 +253,24 @@ class ClassificationDataset(object):
         self.std = np.where(self.std == 0.0, 1.0, self.std)
 
         classification_dir = os.path.join('classification_dataset', dataset)
-        if use_genias:
-            classification_data_dir = os.path.join(
-                classification_dir, subdata, 'use_genias',
-            )
-        else:
-            classification_data_dir = os.path.join(
-                classification_dir, subdata, 'without_genias',
-            )
+
+        if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+            classification_dir = os.path.join(classification_dir, subdata)
+        
+        classification_dir = os.path.join(classification_dir, scheme)
         
         if mode == 'train':
             anchors = convert_to_windows(data=data, window_size=window_size)
             negative_pairs = np.load(
-                os.path.join(classification_data_dir, 'negative_pairs.npy')
+                os.path.join(classification_dir, 'negative_pairs.npy')
             )
             self.windows = np.concatenate([anchors, negative_pairs], axis=0)
 
             anchor_nn_indices = np.load(
-                os.path.join(classification_data_dir, 'anchor_nn_indices.npy')
+                os.path.join(classification_dir, 'anchor_nn_indices.npy')
             )
             negative_nn_indices = np.load(
-                os.path.join(classification_data_dir, 'negative_nn_indices.npy')
+                os.path.join(classification_dir, 'negative_nn_indices.npy')
             )
             
             anchor_nns = []
@@ -299,10 +278,18 @@ class ClassificationDataset(object):
 
             for idx in range(anchors.shape[0]):
                 anchor_nn_idx = anchor_nn_indices[idx]
+
+                if neighborhood_choice == 'random_choice':
+                    anchor_nn_idx = np.random.choice(anchor_nn_idx)
+                
                 anchor_nns.append(self.windows[anchor_nn_idx])
 
             for idx in range(negative_pairs.shape[0]):
                 negative_nn_idx = negative_nn_indices[idx]
+
+                if neighborhood_choice == 'random_choice':
+                    negative_nn_idx = np.random.choice(negative_nn_idx)
+                
                 negative_nns.append(self.windows[negative_nn_idx])
             
             anchor_nns = np.array(anchor_nns)
@@ -310,10 +297,10 @@ class ClassificationDataset(object):
             self.nns = np.concatenate([anchor_nns, negative_nns], axis=0)
 
             anchor_fn_indices = np.load(
-                os.path.join(classification_data_dir, 'anchor_fn_indices.npy')
+                os.path.join(classification_dir, 'anchor_fn_indices.npy')
             )
             negative_fn_indices = np.load(
-                os.path.join(classification_data_dir, 'negative_fn_indices.npy')
+                os.path.join(classification_dir, 'negative_fn_indices.npy')
             )
 
             anchor_fns = []
@@ -321,10 +308,18 @@ class ClassificationDataset(object):
 
             for idx in range(anchors.shape[0]):
                 anchor_fn_idx = anchor_fn_indices[idx]
+
+                if neighborhood_choice == 'random_choice':
+                    anchor_fn_idx = np.random.choice(anchor_fn_idx)
+                
                 anchor_fns.append(self.windows[anchor_fn_idx])
 
             for idx in range(negative_pairs.shape[0]):
                 negative_fn_idx = negative_fn_indices[idx]
+
+                if neighborhood_choice == 'random_choice':
+                    negative_fn_idx = np.random.choice(negative_fn_idx)
+                
                 negative_fns.append(self.windows[negative_fn_idx])
             
             anchor_fns = np.array(anchor_fns)

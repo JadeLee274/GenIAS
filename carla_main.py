@@ -57,7 +57,7 @@ def cosine_schedule(
 def pretext(
     dataset: str,
     subdata: Optional[str] = None,
-    use_genias: bool = False,
+    scheme: str = 'carla',
     epochs: int = 30,
     batch_size: int = 50,
     learning_rate: float = 1e-3,
@@ -108,7 +108,7 @@ def pretext(
     train_dataset = PretextDataset(
         dataset=dataset,
         subdata=subdata,
-        use_genias=use_genias,
+        scheme=scheme,
     )
     data_dim = train_dataset.data_dim
     model = PretextModel(in_channels=data_dim, mid_channels=4)
@@ -129,13 +129,10 @@ def pretext(
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
         ckpt_dir = os.path.join(ckpt_dir, subdata)
 
-    if use_genias:
-        ckpt_dir = os.path.join(ckpt_dir, 'use_genias')
-    else:
-        ckpt_dir = os.path.join(ckpt_dir, 'without_genias')
-    
+    ckpt_dir = os.path.join(ckpt_dir, scheme)
     os.makedirs(ckpt_dir, exist_ok=True)
 
+    # Train
     model.train()
 
     for epoch in range(epochs):
@@ -214,15 +211,12 @@ def pretext(
     f'{index_searcher.d} != {reps.shape[1]}'
     index_searcher.add(reps)
 
-    if use_genias:
-        classification_dir = os.path.join(
-            'classification_dataset', dataset, subdata, 'use_genias',
-        )
-    else:
-        classification_dir = os.path.join(
-            'classification_dataset', dataset, subdata, 'without_genias',
-        )
+    classification_dir = os.path.join('classification_dataset', dataset)
+
+    if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+        classification_dir = os.path.join(classification_dir, subdata)
     
+    classification_dir = os.path.join(classification_dir, scheme)
     os.makedirs(classification_dir, exist_ok=True)
 
     # Selecting nearest/furthest indices of the anchor.
@@ -283,7 +277,8 @@ def pretext(
 def classification(
     dataset: str,
     subdata: Optional[str] = None,
-    use_genias: bool = False,
+    scheme: str = 'carla',
+    neighborhood_choice: str = 'random_choice',
     gpu_num: int = 0,
     epochs: int = 100,
     batch_size: int = 50,
@@ -296,7 +291,8 @@ def classification(
         dataset=dataset,
         subdata=subdata,
         mode='train',
-        use_genias=use_genias
+        scheme=scheme,
+        neighborhood_choice=neighborhood_choice,
     )
     data_dim = train_dataset.data_dim
     model = ClassificationModel(in_channels=data_dim)
@@ -305,14 +301,9 @@ def classification(
 
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
         resnet_dir = os.path.join(resnet_dir, subdata)
-
-    if use_genias:
-        resnet_dir = os.path.join(resnet_dir, 'use_genias')
-        resnet_ckpt = torch.load(os.path.join(resnet_dir, 'epoch_30.pt'))
-    else:
-        resnet_dir = os.path.join(resnet_dir, 'without_genias')
-        resnet_ckpt = torch.load(os.path.join(resnet_dir, 'epoch_30.pt'))
-
+    
+    resnet_dir = os.path.join(resnet_dir, scheme)
+    resnet_ckpt = torch.load(os.path.join(resnet_dir, 'epoch_30.pt'))
     model.resnet.load_state_dict(resnet_ckpt['resnet'])
     model = model.to(device)
 
@@ -327,18 +318,15 @@ def classification(
     )
     criterion = classificationloss()
 
-    ckpt_dir = os.path.join('checkpoints/classification', dataset)
+    ckpt_dir = os.path.join('checkpoints' 'classification', dataset)
 
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
         ckpt_dir = os.path.join(ckpt_dir, subdata)
-
-    if use_genias:
-        ckpt_dir = os.path.join(ckpt_dir, 'without_genias')
-    else:
-        ckpt_dir = os.path.join(ckpt_dir, 'use_genias')
-
+    
+    ckpt_dir = os.path.join(ckpt_dir, scheme)
     os.makedirs(ckpt_dir, exist_ok=True)
 
+    # Train
     logging.info(f'Classification training on {dataset} {subdata} start...\n')
     model.train()
 
@@ -369,12 +357,31 @@ def classification(
             batch_consistency = 0.0
             batch_inconsistency = 0.0
 
-            for i in range(nearest_neighbor.shape[1]):
-                nearest = nearest_neighbor[:, i].transpose(-2, -1)
-                furthest = furthest_neighbor[:, i].transpose(-2, -1)
+            if neighborhood_choice == 'all':
+                for i in range(nearest_neighbor.shape[1]):
+                    nearest = nearest_neighbor[:, i].transpose(-2, -1)
+                    furthest = furthest_neighbor[:, i].transpose(-2, -1)
 
-                nearest_logit = model.forward(nearest)
-                furthest_logit = model.forward(furthest)
+                    nearest_logit = model.forward(nearest)
+                    furthest_logit = model.forward(furthest)
+
+                    consistency_sum, consistency, inconsistency \
+                    = criterion(
+                        window_logit=window_logit,
+                        nearest_logit=nearest_logit,
+                        furthest_logit=furthest_logit,
+                    )
+                    
+                    batch_consistency_sum += consistency_sum
+                    batch_consistency += consistency
+                    batch_inconsistency += inconsistency
+            
+            elif neighborhood_choice == 'random_choice':
+                nearest_neighbor = nearest_neighbor.transpose(-2, -1)
+                furthest_neighbor = furthest_neighbor.transpose(-2, -1)
+
+                nearest_logit = model.forward(nearest_neighbor)
+                furthest_logit = model.forward(furthest_neighbor)
 
                 consistency_sum, consistency, inconsistency \
                 = criterion(
@@ -382,13 +389,12 @@ def classification(
                     nearest_logit=nearest_logit,
                     furthest_logit=furthest_logit,
                 )
-                
+
                 batch_consistency_sum += consistency_sum
                 batch_consistency += consistency
                 batch_inconsistency += inconsistency
             
             batch_loss += batch_consistency_sum
-
             epoch_consistency_loss += batch_consistency
             epoch_inconsistency_loss += batch_inconsistency
 
@@ -431,7 +437,8 @@ def classification(
         dataset=dataset,
         subdata=subdata,
         mode='test',
-        use_genias=use_genias,
+        scheme=scheme,
+        neighborhood_choice=neighborhood_choice,
     )
     
     logits = []
@@ -500,12 +507,20 @@ if __name__ == "__main__":
     args.add_argument(
         '--dataset',
         type=str,
-        help="Dataset. Either 'MSL_SEPARATED' or 'SMAP_SEPARATED'",
+        help="Dataset. Either 'MSL_SEPARATED' or 'SMAP_SEPARATED'.",
     )
     args.add_argument(
-        '--use-genias',
-        type=str2bool,
-        help='Whether to use genias or not.'
+        '--scheme',
+        type=str,
+        default='carla',
+        help="Whether to use carla or genias to create pairs. Default 'carla'."
+    )
+    args.add_argument(
+        '--neighborhood-choice',
+        type=str,
+        default='random_choice',
+        help="How to select neighborhoods in classification stage." \
+        "Default 'random_choice'."
     )
     args.add_argument(
         '--use-wandb',
@@ -561,14 +576,15 @@ if __name__ == "__main__":
             pretext(
                 dataset=config.dataset,
                 subdata=subdata,
-                use_genias=config.use_genias,
+                scheme=config.scheme,
                 gpu_num=config.gpu_num,
             )
             best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
                 dataset=config.dataset,
                 subdata=subdata,
-                use_genias=config.use_genias,
-                gpu_num=config.gpu_num
+                scheme=config.scheme,
+                neighborhood_choice=config.neighborhood_choice,
+                gpu_num=config.gpu_num,
             )
             best_f1_list.append(best_f1_score)
             best_tp_list.append(best_tp)
@@ -584,12 +600,13 @@ if __name__ == "__main__":
         data_dir = os.path.join('data', config.dataset)
         pretext(
             dataset=config.dataset,
-            use_genias=config.use_genias,
+            scheme=config.scheme,
             gpu_num=config.gpu_num,
         )
         best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
             dataset=config.dataset,
-            use_genias=config.use_genias,
+            scheme=config.scheme,
+            neighborhood_choice=config.neighborhood_choice,
             gpu_num=config.gpu_num
         )
         best_f1_list.append(best_f1_score)
