@@ -27,3 +27,4 @@ temp_classification/
 temp_log/
 test_result/
 wandb/
+image/

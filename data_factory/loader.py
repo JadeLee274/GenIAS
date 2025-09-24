@@ -62,6 +62,7 @@ class PretextDataset(object):
         window_size: Window size. Default 200.
         use_genias:  Whether or not to use GenIAS scheme for making positive 
                      and negative pairs. Default False.
+        device:      CUDA or CPU device where the genias VAE operates.
     """
     def __init__(
         self,
@@ -69,11 +70,13 @@ class PretextDataset(object):
         subdata: Optional[str] = None,
         window_size: int = 200,
         scheme: str = 'carla',
+        device: str = 'cpu',
     ) -> None:
         self.dataset = dataset
         self.subdata = subdata
         self.window_size = window_size
         self.scheme = scheme
+        self.device = device
 
         data_dir = os.path.join('data', dataset)
 
@@ -154,27 +157,30 @@ class PretextDataset(object):
                 data_dim=self.data_dim,
                 latent_dim=100,
                 depth=10,
-            )
+            ).to(self.device)
             
-            vae_ckpt = torch.load(os.path.join(vae_dir, 'epoch_1000.pt'))
+            vae_ckpt = torch.load(
+                os.path.join(vae_dir, 'epoch_1000.pt'),
+                map_location=self.device
+                )
             vae.load_state_dict(vae_ckpt['model'])
             vae.eval()
-
-            patch_coef = np.random.choice([0.05, 0.1, 0.2, 0.4, 0.6])
 
             if self.dataset == 'MSL':
                 patch_coef = 0.4
             elif self.dataset in ['SMAP', 'Yahoo']:
                 patch_coef = 0.2
+            else:
+                patch_coef = np.random.choice([0.05, 0.1, 0.2, 0.4, 0.6])
 
             negative_pairs = []
             
             for anchor in self.anchors:
-                anchor = torch.tensor(anchor).float()
+                anchor = torch.tensor(anchor).float().to(self.device)
                 negative_pair = vae.forward(anchor.unsqueeze(0))[-1]
-                negative_pair = negative_pair.detach().squeeze(0).numpy()
+                negative_pair = negative_pair.detach().cpu().squeeze(0).numpy()
                 negative_pair = patch(
-                    x=anchor,
+                    x=anchor.detach().cpu().numpy(),
                     x_tilde=negative_pair,
                     tau=patch_coef,
                 )

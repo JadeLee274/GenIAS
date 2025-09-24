@@ -109,6 +109,7 @@ def pretext(
         dataset=dataset,
         subdata=subdata,
         scheme=scheme,
+        device=device,
     )
     data_dim = train_dataset.data_dim
     model = PretextModel(in_channels=data_dim, mid_channels=4)
