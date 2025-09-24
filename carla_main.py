@@ -65,6 +65,7 @@ def pretext(
     gpu_num: int = 0,
     model_save_interval: int = 5,
     num_neighbors: int = 5,
+    cut_negative_pairs: bool = True,
 ) -> None:
     """
     Training code for pretext stage of CARLA.
@@ -113,7 +114,8 @@ def pretext(
         dataset=dataset,
         subdata=subdata,
         scheme=scheme,
-        shuffle_step=shuffle_step
+        shuffle_step=shuffle_step,
+        cut_negative_pairs=cut_negative_pairs,
     )
 
     data_dim = train_dataset.data_dim
@@ -173,6 +175,7 @@ def pretext(
                         representations=representations_i,
                         current_loss=prev_loss,
                     )
+                    prev_loss = loss_i.item()
                 loss += loss_i
             
             else:
@@ -190,7 +193,10 @@ def pretext(
             
             loss.backward()
             optimizer.step()
-            prev_loss = loss.item()
+
+            if not scheme == 'genias_multiple':
+                prev_loss = loss.item()
+            
             epoch_loss += prev_loss
         
         epoch_loss /= len(train_loader)
@@ -211,6 +217,9 @@ def pretext(
     print(f'Start saving top-{num_neighbors} neighbors...')
     model.eval()
 
+    if cut_negative_pairs:
+        train_dataset._cut_negative_pairs()
+    
     timeseries_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
@@ -228,11 +237,17 @@ def pretext(
         anchor_reps.append(anchor_rep)
 
         if scheme == 'genias_multiple':
-            for i in range(negative_pair.shape[1]):
-                negative_pair_i = negative_pair[:, i].float().transpose(-2, -1)
-                negative_pair_i = negative_pair_i.to(device)
-                negative_rep_i = model.forward(negative_pair_i).detach().cpu()
-                negative_reps.append(negative_rep_i)
+            if cut_negative_pairs:
+                negative_pair = negative_pair.float().transpose(-2, -1)
+                negative_pair = negative_pair.to(device)
+                negative_rep = model.forward(negative_pair).detach().cpu()
+                negative_reps.append(negative_rep)
+            else:
+                for i in range(negative_pair.shape[1]):
+                    negative_pair_i = negative_pair[:, i].float().transpose(-2, -1)
+                    negative_pair_i = negative_pair_i.to(device)
+                    negative_rep_i = model.forward(negative_pair_i).detach().cpu()
+                    negative_reps.append(negative_rep_i)
         else:
             negative_pair = negative_pair.to(device).float().transpose(-2, -1)
             negative_rep = model.forward(negative_pair).detach().cpu()
@@ -383,24 +398,6 @@ def classification(
             batch_consistency = 0.0
             batch_inconsistency = 0.0
 
-            # for i in range(nearest_neighbor.shape[1]):
-            #     nearest = nearest_neighbor[:, i].transpose(-2, -1)
-            #     furthest = furthest_neighbor[:, i].transpose(-2, -1)
-
-            #     nearest_logit = model.forward(nearest.transpose(-2, -1)
-            #     furthest_logit = model.forward(furthest.transpose(-2, -1))
-
-            #     consistency_sum, consistency, inconsistency \
-            #     = criterion(
-            #         window_logit=window_logit,
-            #         nearest_logit=nearest_logit,
-            #         furthest_logit=furthest_logit,
-            #     )
-
-            #     batch_consistency_sum += consistency_sum
-            #     batch_consistency += consisistency
-            #     batch_inconsistency += inconsistency
-
             nearest_logit = model.forward(nearest_neighbor.transpose(-2, -1))
             furthest_logit = model.forward(furthest_neighbor.transpose(-2, -1))
 
@@ -537,9 +534,15 @@ if __name__ == "__main__":
         help="How the pairs are made in pretext stage. Default 'carla'"
     )
     args.add_argument(
-        '--pretext-shuffle-step',
+        '--shuffle-step',
         type=int,
-        help='CARLA and GenIAS scheme alters every this timestep. For shuffle.'
+        help='CARLA and GenIAS scheme alters every this timestep. For shuffle scheme.'
+    )
+    args.add_argument(
+        '--cut-negative-pairs',
+        type=str2bool,
+        default=False,
+        help='Whether to bring only one negative pair for each anchor in classification. Default True.'
     )
     args.add_argument(
         '--use-wandb',
@@ -593,9 +596,9 @@ if __name__ == "__main__":
                 dataset=config.dataset,
                 subdata=subdata,
                 scheme=config.pretext_scheme,
-                shuffle_step=config.pretext_shuffle_step,
-                seed=config.seed,
+                shuffle_step=config.shuffle_step,
                 gpu_num=config.gpu_num,
+                cut_negative_pairs=config.cut_negative_pairs,
             )
             best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
                 dataset=config.dataset,
@@ -617,7 +620,8 @@ if __name__ == "__main__":
         pretext(
             dataset=config.dataset,
             use_genias=config.use_genias,
-            scheme=config.pretext_scheme
+            scheme=config.pretext_scheme,
+            cut_negative_pairs=config.cut_negative_pairs,
         )
         best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
             dataset=config.dataset,
