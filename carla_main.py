@@ -9,7 +9,7 @@ from data_factory.loader import *
 from carla.model import *
 from utils.loss import pretextloss, classificationloss, entropy
 from utils.metric import *
-from utils.fix_seed import seed_fix
+from utils.fix_seed import fix_seed_all
 from utils.set_logging import set_logging_filehandler
 
 
@@ -59,7 +59,6 @@ def pretext(
     subdata: Optional[str] = None,
     scheme: str = 'carla',
     shuffle_step: Optional[int] = None,
-    seed: Optional[int] = None,
     epochs: int = 30,
     batch_size: int = 50,
     learning_rate: float = 1e-3,
@@ -117,9 +116,6 @@ def pretext(
         shuffle_step=shuffle_step
     )
 
-    if scheme == 'genias_multiple':
-        seed_fix(seed=seed, mode='torch')
-    
     data_dim = train_dataset.data_dim
     model = PretextModel(in_channels=data_dim, mid_channels=4)
 
@@ -130,7 +126,7 @@ def pretext(
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=False,
     )
     optimizer = optim.Adam(params=model.parameters(), lr=learning_rate)
 
@@ -164,10 +160,11 @@ def pretext(
 
             if scheme == 'genias_multiple':
                 loss = torch.zeros(1, requires_grad=True).float().to(device)
-                for i in range(negative_pair.shape[1]):
+                for i in range(positive_pair.shape[1]):
+                    positive_pair_i = positive_pair[:, i]
                     negative_pair_i = negative_pair[:, i]
                     triplets_i = torch.cat(
-                        tensors=[anchor, positive_pair, negative_pair_i],
+                        tensors=[anchor, positive_pair_i, negative_pair_i],
                         dim=0,
                     ).float()
                     triplets_i = triplets_i.view(3 * B, F, W)
@@ -348,7 +345,7 @@ def classification(
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=False,
     )
     optimizer = optim.Adam(
         params=model.parameters(),
@@ -570,11 +567,7 @@ if __name__ == "__main__":
     )
     config = args.parse_args()
 
-    if config.pretext_scheme == 'genias_multiple':
-        seed_fix(seed=config.seed, mode='random')
-        seed_fix(seed=config.seed, mode='numpy')
-    else:
-        seed_fix(seed=config.seed, mode='all')
+    fix_seed_all(seed=config.seed)
 
     log_dir = f'log/carla/{config.dataset}'
     os.makedirs(log_dir, exist_ok=True)

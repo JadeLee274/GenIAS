@@ -110,22 +110,8 @@ class PretextDataset(object):
         )
         self.len = self.anchors.shape[0]
 
-        # Get positive pairs
-        positive_pairs = []
-
-        for idx in range(self.anchors.shape[0]):
-            if idx < 10:
-                positive_pair = self.anchors[idx]
-                positive_pair = noise_transformation(positive_pair)
-            else:
-                random_idx = np.random.randint(idx - 10, idx)
-                positive_pair = self.anchors[random_idx]
-
-            positive_pairs.append(positive_pair)
-        
-        self.positive_pairs = np.array(positive_pairs)
-
-        # Get negative pairs
+        # Get pairs
+        self._get_positive_pairs()
         self._get_negative_pairs()
     
     def __len__(self) -> int:
@@ -141,23 +127,42 @@ class PretextDataset(object):
         negative = (negative - self.mean) / self.std 
 
         return anchor, positive, negative
+
+    def _get_positive_pairs(self) -> None:
+        positive_pairs = []
+
+        for idx in range(self.anchors.shape[0]):
+            if self.scheme == 'genias_multiple':
+                if idx < 10:
+                    positive_pair = self.anchors[idx]
+                    positive_pair = [
+                        noise_transformation(positive_pair) \
+                        for _ in range(self.num_pairs)
+                    ]
+                    positive_pair_list = np.array(positive_pair_list)
+                else:
+                    random_idx = np.array([i for i in range(idx - 10, idx)])
+                    random_idx = np.random.choice(random_idx, replace=False)
+                    positive_pair = self.anchors[random_idx]
+                
+                positive_pairs.append(positive_pair)
+
+            else:
+                if idx < 10:
+                    positive_pair = self.anchors[idx]
+                    positive_pair = noise_transformation(positive_pair)
+                else:
+                    random_idx = np.random.randint(idx - 10, idx)
+                    positive_pair = self.anchors[random_idx]
+
+                positive_pairs.append(positive_pair)
+        
+        self.positive_pairs = np.array(positive_pairs)
+
+        return
     
     def _get_negative_pairs(self) -> None:        
         # Negative pair generation algorithm for CARLA        
-        anomaly_injection = AnomalyInjection()
-
-        # Preparing VAE for negative pair generation for GenIAS
-        vae = VAE(
-            window_size=self.window_size,
-            data_dim=self.data_dim,
-            latent_dim=100,
-            depth=10,
-        )
-        vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
-        vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
-        vae.load_state_dict(vae_ckpt['model'])
-        vae.eval()
-
         patch_coef = 0.05 # other options include 0.1 and 0.6
 
         if self.dataset == 'MSL':
@@ -171,10 +176,21 @@ class PretextDataset(object):
             anchor = self.anchors[idx]
 
             if self.scheme == 'carla':
+                anomaly_injection = AnomalyInjection()
                 negative_pair = anomaly_injection(anchor)
                 negative_pairs.append(negative_pair)
             
             elif self.scheme == 'genias':
+                vae = VAE(
+                    window_size=self.window_size,
+                    data_dim=self.data_dim,
+                    latent_dim=100,
+                    depth=10,
+                )
+                vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
+                vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
+                vae.load_state_dict(vae_ckpt['model'])
+                vae.eval()
                 _, _, _, negative_pair = vae.forward(
                     torch.tensor(anchor).float().unsqueeze(0)
                 )
@@ -187,6 +203,17 @@ class PretextDataset(object):
                 negative_pairs.append(negative_pair)
             
             elif self.scheme == 'shuffle':
+                anomaly_injection = AnomalyInjection()
+                vae = VAE(
+                    window_size=self.window_size,
+                    data_dim=self.data_dim,
+                    latent_dim=100,
+                    depth=10,
+                )
+                vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
+                vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
+                vae.load_state_dict(vae_ckpt['model'])
+                vae.eval()
                 idx_mod_step = idx // self.shuffle_step
                 idx_mode = idx_mod_step // 2
                 
@@ -207,6 +234,17 @@ class PretextDataset(object):
                 negative_pairs.append(negative_pair)
             
             elif self.scheme == 'genias_multiple':
+                vae = VAE(
+                    window_size=self.window_size,
+                    data_dim=self.data_dim,
+                    latent_dim=100,
+                    depth=10,
+                )
+                vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
+                vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
+                vae.load_state_dict(vae_ckpt['model'])
+                vae.eval()
+
                 negative_pair = []
 
                 for _ in range(self.num_pairs):
