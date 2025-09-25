@@ -56,7 +56,7 @@ class PretextDataset(object):
         subdata: Optional[str] = None,
         window_size: int = 200,
         scheme: str = 'carla',
-        shuffle_step: Optional[int] = None,
+        mix_step: Optional[int] = None,
         num_pairs: int = 3,
         cut_negative_pairs: bool = True,
     ) -> None:
@@ -64,11 +64,11 @@ class PretextDataset(object):
         self.subdata = subdata
         self.window_size = window_size
 
-        assert scheme in ['carla', 'genias', 'shuffle', 'genias_multiple'], \
-        "'carla', 'genias', 'shuffle', 'genias_multiple'"
+        assert scheme in ['carla', 'genias', 'mix', 'genias_multiple'], \
+        "'carla', 'genias', 'mix', 'genias_multiple'"
 
         self.scheme = scheme
-        self.shuffle_step = shuffle_step
+        self.mix_step = mix_step
         self.num_pairs = num_pairs
         self.cut_negative_pairs = cut_negative_pairs
 
@@ -137,7 +137,20 @@ class PretextDataset(object):
         return
     
     def _get_negative_pairs(self) -> None:        
-        # Negative pair generation algorithm for CARLA        
+        # Negative pair generation algorithm for CARLA
+        anomaly_injection = AnomalyInjection()
+
+        vae = VAE(
+            window_size=self.window_size,
+            data_dim=self.data_dim,
+            latent_dim=100,
+            depth=10,
+        )
+        vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
+        vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
+        vae.load_state_dict(vae_ckpt['model'])
+        vae.eval()
+
         patch_coef = 0.05 # other options include 0.1 and 0.6
 
         if self.dataset == 'MSL':
@@ -151,21 +164,9 @@ class PretextDataset(object):
             anchor = self.anchors[idx]
 
             if self.scheme == 'carla':
-                anomaly_injection = AnomalyInjection()
                 negative_pair = anomaly_injection(anchor)
-                negative_pairs.append(negative_pair)
             
             elif self.scheme == 'genias':
-                vae = VAE(
-                    window_size=self.window_size,
-                    data_dim=self.data_dim,
-                    latent_dim=100,
-                    depth=10,
-                )
-                vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
-                vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
-                vae.load_state_dict(vae_ckpt['model'])
-                vae.eval()
                 _, _, _, negative_pair = vae.forward(
                     torch.tensor(anchor).float().unsqueeze(0)
                 )
@@ -175,25 +176,13 @@ class PretextDataset(object):
                     x_tilde=negative_pair,
                     tau=patch_coef,
                 )
-                negative_pairs.append(negative_pair)
             
-            elif self.scheme == 'shuffle':
-                anomaly_injection = AnomalyInjection()
-                vae = VAE(
-                    window_size=self.window_size,
-                    data_dim=self.data_dim,
-                    latent_dim=100,
-                    depth=10,
-                )
-                vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
-                vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
-                vae.load_state_dict(vae_ckpt['model'])
-                vae.eval()
-                idx_mod_step = idx // self.shuffle_step
+            elif self.scheme == 'mix':
+                idx_mod_step = idx // self.mix_step
                 idx_mode = idx_mod_step // 2
                 
                 if idx_mode == 0: # CARLA scheme applied
-                    negative_pair = anomaly_injection(x=anchor)
+                    negative_pair = anomaly_injection(anchor)
                     
                 elif idx_mode == 1: # GenIAS scheme applied
                     _, _, _, negative_pair = vae.forward(
@@ -205,32 +194,25 @@ class PretextDataset(object):
                         x_tilde=negative_pair,
                         tau=patch_coef,
                     )
-            
-                negative_pairs.append(negative_pair)
-            
+                        
             elif self.scheme == 'genias_multiple':
-                vae = VAE(
-                    window_size=self.window_size,
-                    data_dim=self.data_dim,
-                    latent_dim=100,
-                    depth=10,
-                )
-                vae_dir = f'checkpoints/vae/{self.dataset}/{self.subdata}'
-                vae_ckpt = torch.load(f'{vae_dir}/epoch_1000.pt')
-                vae.load_state_dict(vae_ckpt['model'])
-                vae.eval()
-
                 negative_pair = []
 
                 for _ in range(self.num_pairs):
-                    _, _, _, x_tilde = vae.forward(
+                    _, _, _, negative = vae.forward(
                         torch.tensor(anchor).float().unsqueeze(0)
                     )
-                    x_tilde = x_tilde.detach().squeeze(0).numpy()
-                    negative_pair.append(x_tilde)
-                
+                    negative = negative.detach().squeeze(0).numpy()
+                    negative = patch(
+                        x=anchor,
+                        x_tilde=negative,
+                        tau=patch_coef,
+                    )
+                    negative_pair.append(negative)
+
                 negative_pair = np.array(negative_pair)
-                negative_pairs.append(negative_pair)
+
+            negative_pairs.append(negative_pair)
                 
         self.negative_pairs = np.array(negative_pairs)
 
@@ -267,7 +249,7 @@ class ClassificationDataset(object):
         subdata: Optional[str] = None,
         window_size: int = 200,
         mode: str = 'train',
-        pretext_scheme: str = 'carla',
+        scheme: str = 'carla',
         num_pairs: int = 3,
         cut_negative_pairs: bool = True,
     ) -> None:
@@ -277,8 +259,8 @@ class ClassificationDataset(object):
         assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
         self.mode = mode
 
-        assert pretext_scheme in ['carla', 'genias', 'shuffle', 'genias_multiple'], \
-        "'carla', 'genias', 'shuffle', 'genias_multiple'"
+        assert scheme in ['carla', 'genias', 'mix', 'genias_multiple'], \
+        "'carla', 'genias', 'mix', 'genias_multiple'"
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
             data_dir = f'data/{dataset}'
@@ -313,14 +295,14 @@ class ClassificationDataset(object):
         if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
             classification_dir = f'{classification_dir}/{subdata}'
         
-        classification_dir = f'{classification_dir}/{pretext_scheme}'
+        classification_dir = f'{classification_dir}/{scheme}'
         
         if mode == 'train':
             anchors = convert_to_windows(data=data, window_size=window_size)
             negative_pairs = np.load(
                 f'{classification_dir}/negative_pairs.npy'
             )
-            if pretext_scheme == 'genias_multiple':
+            if scheme == 'genias_multiple':
                 windows = []
                 for idx in range(anchors.shape[0]):
                     windows.append(anchors[idx])
@@ -358,7 +340,7 @@ class ClassificationDataset(object):
 
             negative_nns = []
             
-            if pretext_scheme == 'genias_multiple':
+            if scheme == 'genias_multiple':
                 if cut_negative_pairs:
                     for idx in range(negative_pairs.shape[0]):
                         negative_nn_idx = negative_nn_indices[idx]
@@ -397,7 +379,7 @@ class ClassificationDataset(object):
 
             negative_fns = []
             
-            if pretext_scheme == 'genias_multiple':
+            if scheme == 'genias_multiple':
                 if cut_negative_pairs:
                     for idx in range(negative_pairs.shape[0]):
                         negative_fn_idx = negative_fn_indices[idx]

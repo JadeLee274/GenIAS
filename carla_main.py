@@ -1,4 +1,5 @@
 import argparse, logging
+from datetime import datetime
 from math import cos, pi
 from torch.utils.data import DataLoader
 import torch.optim as optim 
@@ -56,57 +57,20 @@ def cosine_schedule(
 
 def pretext(
     dataset: str,
+    timestamp: str,
     subdata: Optional[str] = None,
     scheme: str = 'carla',
-    shuffle_step: Optional[int] = None,
+    mix_step: Optional[int] = None,
+    dataloader_shuffle: bool = True,
     epochs: int = 30,
     batch_size: int = 50,
     learning_rate: float = 1e-3,
     gpu_num: int = 0,
-    model_save_interval: int = 5,
     num_neighbors: int = 5,
     cut_negative_pairs: bool = True,
 ) -> None:
-    """
-    Training code for pretext stage of CARLA.
-
-    Parameters:
-        dataset:             Name of the dataset.
-        subdata:             When the dataset consists of multiple subdata,
-                             to train on the subdata, write its name on it.
-        use_genias:          Whether or not to use GenIAS scheme for making
-                             positive/negative pairs. Default False.
-        epochs:              Number of pretext training epochs. Dafault 30.
-        batch_size:          Batch size. Default 50.
-        learning_rate:       Initial learning rate. Defaulr 1e-3.
-        gpu_num:             The training will be on this GPU. Default 0.
-        model_save_inderval: The pretext model is saved once in this epoch.
-                             Default 5.
-        num_neighbors:       The number of nearest/furthest neighbors that will
-                             be saved after the pretext training. Default 5.
-
-    Examples:
-
-    - If dataset is 'MSL', then it consists of 27 subdata, C-1, C-2, ..., 
-    T-9, T-12, T-13. For training on C-1, write C-1 as subdata. This holds
-    similarly for 'SMAP', 'SMD', 'Yahoo-A1', 'KPI'.
-
-    - If dataset is 'SWaT' or 'WADI', then don't write anything for subdata
-    argument.
-
-    Pretext model consists of Resnet and mlp head to map anchor, positive pair,
-    and negative pair to the representation space (with dimension 128, in this 
-    case).
-
-    While training, the pretext loss is optimized so that the distance between
-    the anchor and the positive pair get smaller, while that of
-    the anchor and the negative pair get larger, in the representation space.
-
-    The model is saved once in a model_save_interval epochs, in order to be
-    used for the self-supervised stage of CARLA.
-    """
-    assert scheme in ['carla', 'genias', 'shuffle', 'genias_multiple'], \
-    "'carla', 'genias', 'shuffle', 'genias_multiple'"
+    assert scheme in ['carla', 'genias', 'mix', 'genias_multiple'], \
+    "'carla', 'genias', 'mix', 'genias_multiple'"
 
     print(f'Pretext training on {dataset} {subdata} start...\n')
 
@@ -114,7 +78,7 @@ def pretext(
         dataset=dataset,
         subdata=subdata,
         scheme=scheme,
-        shuffle_step=shuffle_step,
+        mix_step=mix_step,
         cut_negative_pairs=cut_negative_pairs,
     )
 
@@ -128,7 +92,7 @@ def pretext(
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=dataloader_shuffle,
     )
     optimizer = optim.Adam(params=model.parameters(), lr=learning_rate)
 
@@ -202,15 +166,14 @@ def pretext(
         epoch_loss /= len(train_loader)
         print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
 
-        if epoch == 0 or (epoch + 1) % model_save_interval == 0:
-            torch.save(
-                obj={
-                    'resnet': model.resnet.state_dict(),
-                    'contrastive_head': model.contrastive_head.state_dict(),
-                    'optim': optimizer.state_dict(),
-                },
-                f=f'{ckpt_dir}/epoch_{epoch + 1}.pt'
-            )
+    torch.save(
+        obj={
+            'resnet': model.resnet.state_dict(),
+            'contrastive_head': model.contrastive_head.state_dict(),
+            'optim': optimizer.state_dict(),
+        },
+        f=f'{ckpt_dir}/{timestamp}.pt'
+    )
 
     print(f'Pretext training on {dataset} {subdata} finished.')
 
@@ -319,13 +282,14 @@ def pretext(
 
 def classification(
     dataset: str,
+    timestamp: str,
     subdata: Optional[str] = None,
-    pretext_scheme: str = 'carla',
+    scheme: str = 'carla',
+    dataloader_shuffle: bool = True,
     gpu_num: int = 0,
     epochs: int = 100,
     batch_size: int = 50,
     learning_rate: float = 1e-2,
-    model_save_interval: int = 5,
 ) -> Tuple[float, int, int, int, float]:
     device = torch.device(f'cuda:{gpu_num}')
 
@@ -333,7 +297,7 @@ def classification(
         dataset=dataset,
         subdata=subdata,
         mode='train',
-        pretext_scheme=pretext_scheme,
+        scheme=scheme,
     )
     data_dim = train_dataset.data_dim
     model = ClassificationModel(in_channels=data_dim)
@@ -343,24 +307,24 @@ def classification(
     ckpt_dir = f'checkpoints/classification/{dataset}'
     
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-        resnet_dir = f'{resnet_dir}/{subdata}/{pretext_scheme}'
-        classification_dir = f'{classification_dir}/{subdata}/{pretext_scheme}'
-        ckpt_dir = f'{ckpt_dir}/{subdata}/{pretext_scheme}'
+        resnet_dir = f'{resnet_dir}/{subdata}/{scheme}'
+        classification_dir = f'{classification_dir}/{subdata}/{scheme}'
+        ckpt_dir = f'{ckpt_dir}/{subdata}/{scheme}'
     else:
-        resnet_dir = f'{resnet_dir}/{pretext_scheme}'
-        classification_dir = f'{classification_dir}/{pretext_scheme}'
-        ckpt_dir = f'{ckpt_dir}/{pretext_scheme}'
+        resnet_dir = f'{resnet_dir}/{scheme}'
+        classification_dir = f'{classification_dir}/{scheme}'
+        ckpt_dir = f'{ckpt_dir}/{scheme}'
 
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    resnet_ckpt = torch.load(f'{resnet_dir}/epoch_30.pt')
+    resnet_ckpt = torch.load(f'{resnet_dir}/{timestamp}.pt')
     model.resnet.load_state_dict(resnet_ckpt['resnet'])
     model = model.to(device)
 
     train_loader = DataLoader(
         dataset=train_dataset,
         batch_size=batch_size,
-        shuffle=False,
+        shuffle=dataloader_shuffle,
     )
     optimizer = optim.Adam(
         params=model.parameters(),
@@ -439,14 +403,13 @@ def classification(
             f'- Total loss: {round(epoch_loss, 4)}\n'
         )
 
-        if epoch == 0 or (epoch + 1) % model_save_interval == 0:
-            torch.save(
-                obj={
-                    'model': model.state_dict(),
-                    'optim': optimizer.state_dict(),
-                },
-                f=f'{ckpt_dir}/epoch_{epoch + 1}.pt',
-            )
+    torch.save(
+        obj={
+            'model': model.state_dict(),
+            'optim': optimizer.state_dict(),
+        },
+        f=f'{ckpt_dir}/{timestamp}.pt',
+    )
     
     logging.info(f'Starting inference on {dataset} {subdata}...\n')
     model.eval()
@@ -455,7 +418,7 @@ def classification(
         dataset=dataset,
         subdata=subdata,
         mode='test',
-        pretext_scheme=pretext_scheme,
+        scheme=scheme,
     )
 
     logits = []
@@ -528,15 +491,16 @@ if __name__ == "__main__":
         help="Dataset.",
     )
     args.add_argument(
-        '--pretext-scheme',
+        '--scheme',
         type=str,
         default='carla',
         help="How the pairs are made in pretext stage. Default 'carla'"
     )
     args.add_argument(
-        '--shuffle-step',
-        type=int,
-        help='CARLA and GenIAS scheme alters every this timestep. For shuffle scheme.'
+        '--mix-step',
+        type=Optional[int],
+        default=None,
+        help='CARLA and GenIAS scheme alters every this timestep. For mix scheme.'
     )
     args.add_argument(
         '--cut-negative-pairs',
@@ -545,10 +509,10 @@ if __name__ == "__main__":
         help='Whether to bring only one negative pair for each anchor in classification. Default True.'
     )
     args.add_argument(
-        '--use-wandb',
-        type=str2bool, 
-        default=False,
-        help="Whether to use wandb log or not. Default False."
+        '--dataloader-shuffle',
+        type=str2bool,
+        default=True,
+        help='Shuffle batches of dataloader. Default True'
     )
     args.add_argument(
         '--batch-size',
@@ -575,10 +539,27 @@ if __name__ == "__main__":
     log_dir = f'log/carla/{config.dataset}'
     os.makedirs(log_dir, exist_ok=True)
 
-    log_file_path = f'{log_dir}/{config.pretext_scheme}_results.log'
+    now = datetime.now()
+    timestamp = now.strftime("%m%d_%H%M")
+
+    log_file_path = f'{log_dir}/{config.scheme}/{timestamp}.log'
     
     set_logging_filehandler(log_file_path=log_file_path)
-    logging.info(f'Train and inference log of {config.dataset}')
+    logging.info(f'Experiment log of {config.dataset}\n')
+    logging.info(f'Settings:')
+    logging.info(f'- Date: {timestamp.replace('_', ' ')}')
+    logging.info(f'- Dataset: {config.dataset}')
+    logging.info(f'- Scheme: {config.scheme}')
+
+    if config.scheme == 'mix':
+        logging.info(f'- Mix step: {config.mix_step}')
+    
+    if config.scheme == 'multiple_genias':
+        logging.info(f'- Cut negative pairs: {config.cut_negative_pairs}')
+
+    logging.info(f'- Dataloader Shuffle: {config.dataloader_shuffle}')
+    logging.info(f'- GPU number: {config.gpu_num}\n')
+
 
     best_f1_list = []
     best_tp_list = []
@@ -594,16 +575,20 @@ if __name__ == "__main__":
         for subdata in data_list:
             pretext(
                 dataset=config.dataset,
+                timestamp=timestamp,
                 subdata=subdata,
-                scheme=config.pretext_scheme,
-                shuffle_step=config.shuffle_step,
+                scheme=config.scheme,
+                mix_step=config.mix_step,
+                dataloader_shuffle=config.dataloader_shuffle,
                 gpu_num=config.gpu_num,
                 cut_negative_pairs=config.cut_negative_pairs,
             )
             best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
                 dataset=config.dataset,
+                timestamp=timestamp,
                 subdata=subdata,
-                pretext_scheme=config.pretext_scheme,
+                scheme=config.scheme,
+                dataloader_shuffle=config.dataloader_shuffle,
                 gpu_num=config.gpu_num
             )
             best_f1_list.append(best_f1_score)
@@ -619,13 +604,18 @@ if __name__ == "__main__":
     else:
         pretext(
             dataset=config.dataset,
-            use_genias=config.use_genias,
-            scheme=config.pretext_scheme,
+            timestamp=timestamp,
+            scheme=config.scheme,
+            mix_step=config.mix_step,
+            dataloader_shuffle=config.dataloader_shuffle,
+            gpu_num=config.gpu_num,
             cut_negative_pairs=config.cut_negative_pairs,
         )
         best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
             dataset=config.dataset,
-            pretext_scheme=config.pretext_scheme,
+            timestamp=timestamp,
+            scheme=config.scheme,
+            dataloader_shuffle=config.dataloader_shuffle,
             gpu_num=config.gpu_num
         )
         best_f1_list.append(best_f1_score)
