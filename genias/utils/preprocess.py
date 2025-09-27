@@ -1,9 +1,6 @@
-import ast
 import random
 import pandas as pd
-from faiss import IndexFlatL2
-from utils.common_import import *
-device = torch.device('cuda:0')
+from genias.utils.common_import import *
 
 
 ########################## File converting functions ##########################

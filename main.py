@@ -1,58 +1,16 @@
 import argparse, logging
 from datetime import datetime
-from math import cos, pi
 from torch.utils.data import DataLoader
-import torch.optim as optim 
+import torch.optim as optim
+import torch.optim.lr_scheduler as sched
 from faiss import IndexFlatL2
 from sklearn.metrics import precision_recall_curve, auc
-from utils.common_import import *
-from data_factory.loader import *
-from carla.model import *
-from utils.loss import pretextloss, classificationloss, entropy
-from utils.metric import *
-from utils.fix_seed import fix_seed_all
-from utils.set_logging import set_logging_filehandler
-
-
-def str2bool(v: str) -> bool:
-    """
-    Changes string to bool.
-
-    Parameters:
-        v: String. Must be either 'True' or 'False'.
-    """
-    assert v in ['True', 'False'], "string must be either 'True' or 'False'"
-
-    return v.lower() in 'true'
-
-
-def cosine_schedule(
-    optimizer: optim.Adam,
-    current_epoch: int,
-    total_epochs: int = 30,
-    initial_learning_rate: float = 1e-3,
-    lr_decay_rate: float = 0.01,
-) -> None:
-    """
-    Customized cosine scheduler. Updates optimizer's learning rate.
-
-    Parameters:
-        optimizer:             Adam.
-        current_epoch:         Current training epoch.
-        total_epochs:          Total training epochs. Default 30.
-        initial_learning_rate: Initial learning rate. Defalut 1e-3.
-        lr_dacay_rate:         Decay rate of initial learning rate.
-                               Default 0.01.
-    """
-    eta_min = initial_learning_rate * (lr_decay_rate ** 3)
-    scheduled_learning_rate = eta_min \
-    + (initial_learning_rate - eta_min) \
-    * (1 + cos(pi * current_epoch / total_epochs)) / 2
-
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = scheduled_learning_rate
-
-    return
+from genias.utils.common_import import *
+from genias.data_factory.loader import *
+from genias.models.carla import *
+from genias.utils.loss import *
+from genias.utils.metric import *
+from genias.utils.main import *
 
 
 def pretext(
@@ -69,8 +27,12 @@ def pretext(
     num_neighbors: int = 5,
     cut_negative_pairs: bool = True,
 ) -> None:
-    assert scheme in ['carla', 'genias', 'mix', 'genias_multiple'], \
-    "'carla', 'genias', 'mix', 'genias_multiple'"
+    assert scheme in [
+        'carla_original',
+        'genias',
+        'mix',
+        'genias_multiple',
+    ], "'carla', 'genias', 'mix', 'genias_multiple', 'carla_temp'"
 
     print(f'Pretext training on {dataset} {subdata} start...\n')
 
@@ -81,10 +43,9 @@ def pretext(
         mix_step=mix_step,
         cut_negative_pairs=cut_negative_pairs,
     )
-
     data_dim = train_dataset.data_dim
-    model = PretextModel(in_channels=data_dim, mid_channels=4)
 
+    model = PretextModel(in_channels=data_dim, mid_channels=4)
     device = torch.device(f'cuda:{gpu_num}')
     model = model.to(device)
     criterion = pretextloss()
@@ -96,16 +57,16 @@ def pretext(
     )
     optimizer = optim.Adam(params=model.parameters(), lr=learning_rate)
 
-    ckpt_dir = f'checkpoints/pretext/{dataset}'
-    classification_dir = f'classification_dataset/{dataset}'
+    ckpt_dir = os.path.join('genias', 'checkpoints', 'pretext', dataset)
+    classification_dir = os.path.join(
+        'genias', 'data', 'classification_dataset', dataset)
     
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-        ckpt_dir = f'{ckpt_dir}/{subdata}/{scheme}'
-        classification_dir = f'{classification_dir}/{subdata}/{scheme}'
-    else:
-        ckpt_dir = f'{ckpt_dir}/{scheme}'
-        classification_dir = f'{classification_dir}/{scheme}'
+        ckpt_dir = os.path.join(ckpt_dir, subdata)
+        classification_dir = os.path.join(classification_dir, subdata)
 
+    ckpt_dir = os.path.join(ckpt_dir, scheme)
+    classification_dir = os.path.join(classification_dir, scheme)
     os.makedirs(ckpt_dir, exist_ok=True)
     os.makedirs(classification_dir, exist_ok=True)
 
@@ -126,6 +87,7 @@ def pretext(
 
             if scheme == 'genias_multiple':
                 loss = torch.zeros(1, requires_grad=True).float().to(device)
+                
                 for i in range(positive_pair.shape[1]):
                     positive_pair_i = positive_pair[:, i]
                     negative_pair_i = negative_pair[:, i]
@@ -135,11 +97,9 @@ def pretext(
                     ).float()
                     triplets_i = triplets_i.view(3 * B, F, W)
                     representations_i = model.forward(triplets_i)
-                    loss_i = criterion(
-                        representations=representations_i,
-                        current_loss=prev_loss,
-                    )
+                    loss_i = criterion(representations_i, prev_loss)
                     prev_loss = loss_i.item()
+                
                 loss += loss_i
             
             else:
@@ -150,10 +110,7 @@ def pretext(
 
                 triplets = triplets.view(3 * B, F, W)
                 representations = model.forward(triplets)
-                loss = criterion(
-                    representations=representations,
-                    current_loss=prev_loss,
-                )
+                loss = criterion(representations, prev_loss)
             
             loss.backward()
             optimizer.step()
@@ -172,7 +129,7 @@ def pretext(
             'contrastive_head': model.contrastive_head.state_dict(),
             'optim': optimizer.state_dict(),
         },
-        f=f'{ckpt_dir}/{timestamp}.pt'
+        f=os.path.join(ckpt_dir, f'{timestamp}.pt')
     )
 
     print(f'Pretext training on {dataset} {subdata} finished.')
@@ -180,8 +137,8 @@ def pretext(
     print(f'Start saving top-{num_neighbors} neighbors...')
     model.eval()
 
-    if cut_negative_pairs:
-        train_dataset._cut_negative_pairs()
+    if scheme == 'genias_multiple' and cut_negative_pairs:
+        train_dataset.cut_negative_pairs()
     
     timeseries_loader = DataLoader(
         dataset=train_dataset,
@@ -207,9 +164,11 @@ def pretext(
                 negative_reps.append(negative_rep)
             else:
                 for i in range(negative_pair.shape[1]):
-                    negative_pair_i = negative_pair[:, i].float().transpose(-2, -1)
+                    negative_pair_i = negative_pair[:, i]
+                    negative_pair_i = negative_pair_i.float().transpose(-2, -1)
                     negative_pair_i = negative_pair_i.to(device)
-                    negative_rep_i = model.forward(negative_pair_i).detach().cpu()
+                    negative_rep_i = model.forward(negative_pair_i)
+                    negative_rep_i = negative_rep_i.detach().cpu()
                     negative_reps.append(negative_rep_i)
         else:
             negative_pair = negative_pair.to(device).float().transpose(-2, -1)
@@ -222,7 +181,7 @@ def pretext(
     reps = np.concatenate([anchor_reps, negative_reps], axis=0)
 
     index_searcher = IndexFlatL2(reps.shape[1])
-    assert index_searcher.d == reps.shape[1],\
+    assert index_searcher.d == reps.shape[1], \
     f'{index_searcher.d} != {reps.shape[1]}'
     index_searcher.add(reps)
 
@@ -242,11 +201,11 @@ def pretext(
     nearest_indices_list = np.array(nearest_indices_list)
     furthest_indices_list = np.array(furthest_indices_list)
     np.save(
-        file=f'{classification_dir}/anchor_nn_indices.npy',
+        file=os.path.join(classification_dir, 'anchor_nn_indices.npy'),
         arr=nearest_indices_list,
     )
     np.save(
-        file=f'{classification_dir}/anchor_fn_indices.npy',
+        file=os.path.join(classification_dir, 'anchor_fn_indices.npy'),
         arr=furthest_indices_list,
     )
 
@@ -267,11 +226,11 @@ def pretext(
     nearest_indices_list = np.array(nearest_indices_list)
     furthest_indices_list = np.array(furthest_indices_list)
     np.save(
-        file=f'{classification_dir}/negative_nn_indices.npy',
+        file=os.path.join(classification_dir, 'negative_nn_indices.npy'),
         arr=nearest_indices_list,
     )
     np.save(
-        file=f'{classification_dir}/negative_fn_indices.npy',
+        file=os.path.join(classification_dir, 'negative_fn_indices.npy'),
         arr=furthest_indices_list,
     )
 
@@ -290,7 +249,12 @@ def classification(
     epochs: int = 100,
     batch_size: int = 50,
     learning_rate: float = 1e-2,
+    cut_negative_pairs: bool = True,
 ) -> Tuple[float, int, int, int, float]:
+    assert scheme in [
+        'carla_original', 'genias', 'mix', 'genias_multiple'
+    ], "'carla_original', 'genias', 'mix', 'genias_multiple'"
+
     device = torch.device(f'cuda:{gpu_num}')
 
     train_dataset = ClassificationDataset(
@@ -302,22 +266,21 @@ def classification(
     data_dim = train_dataset.data_dim
     model = ClassificationModel(in_channels=data_dim)
 
-    resnet_dir = f'checkpoints/pretext/{dataset}'
-    classification_dir = f'classification_datset/{dataset}'
-    ckpt_dir = f'checkpoints/classification/{dataset}'
+    resnet_dir = os.path.join('genias', 'checkpoints', 'pretext', dataset)
+    classification_dir = os.path.join('classification_dataset', dataset)
+    ckpt_dir = os.path.join('genias', 'checkpoints', 'classification', dataset)
     
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-        resnet_dir = f'{resnet_dir}/{subdata}/{scheme}'
-        classification_dir = f'{classification_dir}/{subdata}/{scheme}'
-        ckpt_dir = f'{ckpt_dir}/{subdata}/{scheme}'
-    else:
-        resnet_dir = f'{resnet_dir}/{scheme}'
-        classification_dir = f'{classification_dir}/{scheme}'
-        ckpt_dir = f'{ckpt_dir}/{scheme}'
-
+        resnet_dir = os.path.join(resnet_dir, subdata)
+        classification_dir = os.path.join(classification_dir, subdata)
+        ckpt_dir = os.path.join(ckpt_dir, subdata)
+    
+    resnet_dir = os.path.join(resnet_dir, scheme)
+    classification_dir = os.path.join(classification_dir, scheme)
+    ckpt_dir = os.path.join(ckpt_dir, scheme)
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    resnet_ckpt = torch.load(f'{resnet_dir}/{timestamp}.pt')
+    resnet_ckpt = torch.load(os.path.join(resnet_dir, f'{timestamp}.pt'))
     model.resnet.load_state_dict(resnet_ckpt['resnet'])
     model = model.to(device)
 
@@ -348,8 +311,10 @@ def classification(
             window, nearest_neighbor, furthest_neighbor = batch
 
             window = window.to(device).float()
-            nearest_neighbor = nearest_neighbor.to(device).float()
-            furthest_neighbor = furthest_neighbor.to(device).float()
+            nearest_neighbor = nearest_neighbor.to(device)
+            nearest_neighbor = nearest_neighbor.float().transpose(-2, -1)
+            furthest_neighbor = furthest_neighbor.to(device)
+            furthest_neighbor = furthest_neighbor.float().transpose(-2, -1)
 
             window = window.transpose(-2, -1)
             window_logit = model.forward(window)
@@ -362,15 +327,12 @@ def classification(
             batch_consistency = 0.0
             batch_inconsistency = 0.0
 
-            nearest_logit = model.forward(nearest_neighbor.transpose(-2, -1))
-            furthest_logit = model.forward(furthest_neighbor.transpose(-2, -1))
+            if cut_negative_pairs:
+                nearest_logit = model.forward(nearest_neighbor)
+                furthest_logit = model.forward(furthest_neighbor)
 
-            consistency_sum, consistency, inconsistency \
-            = criterion(
-                window_logit=window_logit,
-                nearest_logit=nearest_logit,
-                furthest_logit=furthest_logit,
-            )
+                consistency_sum, consistency, inconsistency \
+                = criterion(window_logit, nearest_logit, furthest_logit)
             
             batch_consistency_sum += consistency_sum
             batch_consistency += consistency
@@ -408,7 +370,7 @@ def classification(
             'model': model.state_dict(),
             'optim': optimizer.state_dict(),
         },
-        f=f'{ckpt_dir}/{timestamp}.pt',
+        f=os.path.join(ckpt_dir, f'{timestamp}.pt'),
     )
     
     logging.info(f'Starting inference on {dataset} {subdata}...\n')
@@ -483,29 +445,151 @@ def classification(
     return best_f1_score, best_tp, best_fp, best_fn, auc_pr
 
 
+def vae_train(
+    dataset: str,
+    subdata: str,
+    batch_size: int = 100,
+    depth: int = 10,
+    window_size: int = 200,
+    latent_dim: int = 100,
+    gpu_num: int = 0,
+    epochs: int = 1000,
+    init_lr: float = 1e-4,
+    checkpoint_step: int = 100,
+) -> None:
+    train_data = GenIASDataset(
+        dataset=dataset,
+        subdata=subdata,
+        window_size=window_size,
+    )
+    data_dim = train_data.data_dim
+
+    device = torch.device(f'cuda:{gpu_num}')
+
+    model = VAE(
+        window_size=window_size,
+        data_dim=data_dim,
+        latent_dim=latent_dim,
+        depth=depth,
+    ).to(device)
+
+    train_loader = DataLoader(
+        dataset=train_data,
+        batch_size=batch_size,
+        shuffle=True,
+    )
+
+    optimizer = optim.Adam(params=model.parameters(), lr=init_lr)
+    scheduler = sched.StepLR(optimizer=optimizer, step_size=10, gamma=0.99)
+
+    ckpt_dir = os.path.join('genias', 'checkpoints', 'vae', dataset)
+
+    if dataset in ['MSL', 'SMAP', 'SMD', 'KPI', 'Yahoo-A1']:
+        ckpt_dir = os.path.join(ckpt_dir, subdata)
+
+    os.makedirs(ckpt_dir, exist_ok=True)
+
+    logging.info(f'VAE training log for {dataset} {subdata} dataset\n')
+
+    for epoch in range(epochs):
+        recon_loss = 0.0
+        pert_loss = 0.0
+        zero_pert_loss = 0.0
+        kld_loss = 0.0
+        train_loss = 0.0
+
+        for data in train_loader:
+            data = data.to(device).float()
+            optimizer.zero_grad()
+            mu, logvar, x_hat, x_tilde = model(data)
+            recon, pert, zero_pert, kld, total_loss = vae_loss(
+                x=data,
+                x_hat=x_hat,
+                x_tilde=x_tilde,
+                mu=mu,
+                logvar=logvar
+            )
+            total_loss.backward()
+            recon_loss += recon
+            pert_loss += pert
+            zero_pert_loss += zero_pert
+            kld_loss += kld
+            train_loss += total_loss.item()
+            optimizer.step()
+
+        scheduler.step()
+
+        recon_loss /= len(train_loader)
+        pert_loss /= len(train_loader)
+        zero_pert_loss /= len(train_loader)
+        kld_loss /= len(train_loader)
+        train_loss /= len(train_loader)
+
+        logging.info(f'Epoch {epoch+1} loss:')
+        logging.info(f'- Reconstruction loss: {recon_loss:.4f}')
+        logging.info(f'- Perturbation loss: {pert_loss:.4f}')
+        logging.info(f'- Zero perturbation loss: {zero_pert_loss:.4f}')
+        logging.info(f'- KL-Divergence loss: {kld_loss:.4f}')
+        logging.info(f'- Total loss: {train_loss:.4f}\n')
+
+        if epoch == 0 or (epoch + 1) % checkpoint_step == 0:
+            torch.save(
+                obj={
+                    'model': model.state_dict(),
+                    'optim': optimizer.state_dict(),
+                },
+                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
+            )
+            
+    logging.info('Training Finished')
+
+    return
+
+
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
+    args.add_argument(
+        '--exp-name',
+        type=str,
+        required=True,
+        help='The name of the experiment.',
+    )
+    args.add_argument(
+        '--task',
+        type=str,
+        default='carla_all',
+        help='Which task will be performed.'
+    )
     args.add_argument(
         '--dataset',
         type=str,
         help="Dataset.",
     )
     args.add_argument(
-        '--scheme',
+        '--start-subdata',
         type=str,
-        default='carla',
-        help="How the pairs are made in pretext stage. Default 'carla'"
+        help='From which subdata that the process will be started.'
+    )
+    args.add_argument(
+        '--carla-scheme',
+        type=str,
+        default='carla_original',
+        help="How the pairs will be made for CARLA stage. Default 'carla_original'."
+    )
+    args.add_argument(
+        '--timestamp',
+        type=str,
+        help='When task is classification, uses pretext model trained in this time.'
     )
     args.add_argument(
         '--mix-step',
-        type=Optional[int],
-        default=None,
+        type=int,
         help='CARLA and GenIAS scheme alters every this timestep. For mix scheme.'
     )
     args.add_argument(
         '--cut-negative-pairs',
         type=str2bool,
-        default=False,
+        default=True,
         help='Whether to bring only one negative pair for each anchor in classification. Default True.'
     )
     args.add_argument(
@@ -532,124 +616,169 @@ if __name__ == "__main__":
         default=42,
         help='Fixed seed. Default 42.',
     )
+    args.add_argument(
+        '--vae-depth',
+        type=int,
+        default=10,
+        help='Depth of encoder and decoder of VAE. Default 10.'
+    )
     config = args.parse_args()
+    assert config.task in [
+        'pretext',
+        'classification',
+        'carla_all',
+        'vae_train'
+    ], "task: 'pretext', 'classification', 'carla_all', 'vae_train'"
 
     fix_seed_all(seed=config.seed)
 
-    log_dir = f'log/carla/{config.dataset}'
-    os.makedirs(log_dir, exist_ok=True)
+    if config.task == 'classification':
+        timestamp = config.timestamp
+    else:
+        now = datetime.now()
+        timestamp = now.strftime("%m%d_%H%M")
+        
 
-    now = datetime.now()
-    timestamp = now.strftime("%m%d_%H%M")
+    if config.task != 'pretext':
+        log_dir = os.path.join('log', config.task, config.dataset)
 
-    log_file_path = f'{log_dir}/{config.scheme}/{timestamp}.log'
-    
-    set_logging_filehandler(log_file_path=log_file_path)
-    logging.info(f'Experiment log of {config.dataset}\n')
-    logging.info(f'Settings:')
-    logging.info(f'- Date: {timestamp.replace('_', ' ')}')
-    logging.info(f'- Dataset: {config.dataset}')
-    logging.info(f'- Scheme: {config.scheme}')
+        if config.task != 'vae_train':
+            log_dir = os.path.join(log_dir, config.carla_scheme)
 
-    if config.scheme == 'mix':
-        logging.info(f'- Mix step: {config.mix_step}')
-    
-    if config.scheme == 'multiple_genias':
-        logging.info(f'- Cut negative pairs: {config.cut_negative_pairs}')
+        os.makedirs(log_dir, exist_ok=True)
+        
+        log_file_path = os.path.join(log_dir, f'{timestamp}.log')
 
-    logging.info(f'- Dataloader Shuffle: {config.dataloader_shuffle}')
-    logging.info(f'- GPU number: {config.gpu_num}\n')
+        set_logging_filehandler(log_file_path=log_file_path)
 
+        logging.info(f'Experiment: {config.exp_name}\n')
+        logging.info(f'Settings:')
+        logging.info(f'- Task: {config.task}')
+        logging.info(f'- Date: {timestamp.replace('_', ' ')}')
+        logging.info(f'- Dataset: {config.dataset}')
+
+        if config.start_subdata is not None:
+            logging.info(f'- Starts from {config.start_subdata}')
+
+        if config.task == 'classification':
+            logging.info(f'- Timestamp of pretext used: {timestamp}')
+
+        if config.task != 'vae_train':
+            logging.info(f'- Carla scheme: {config.carla_scheme}')
+
+        if config.carla_scheme == 'mix':
+            logging.info(f'- Mix step: {config.mix_step}')
+        
+        elif config.carla_scheme == 'multiple_genias':
+            logging.info(f'- Cut negative pairs: {config.cut_negative_pairs}')
+
+        logging.info(f'- Dataloader Shuffle: {config.dataloader_shuffle}')
+        logging.info(f'- GPU number: {config.gpu_num}\n')
 
     best_f1_list = []
     best_tp_list = []
     best_fp_list = []
     best_fn_list = []
     auc_pr_list = []
-
+    
     if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
-        data_dir = f'data/{config.dataset}/train'
+        data_dir = os.path.join(
+            'genias', 'data', 'dataset', config.dataset, 'train'
+        )
         data_list = sorted(os.listdir(data_dir))
         data_list = [data.replace('.npy', '') for data in data_list]
 
+        if config.start_subdata is not None:
+            start_idx = data_list.index(config.start_subdata)
+            data_list = data_list[start_idx:]
+
         for subdata in data_list:
-            pretext(
-                dataset=config.dataset,
-                timestamp=timestamp,
-                subdata=subdata,
-                scheme=config.scheme,
-                mix_step=config.mix_step,
-                dataloader_shuffle=config.dataloader_shuffle,
-                gpu_num=config.gpu_num,
-                cut_negative_pairs=config.cut_negative_pairs,
-            )
-            best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
-                dataset=config.dataset,
-                timestamp=timestamp,
-                subdata=subdata,
-                scheme=config.scheme,
-                dataloader_shuffle=config.dataloader_shuffle,
-                gpu_num=config.gpu_num
-            )
-            best_f1_list.append(best_f1_score)
-            best_tp_list.append(best_tp)
-            best_fp_list.append(best_fp)
-            best_fn_list.append(best_fn)
-            auc_pr_list.append(auc_pr)
+            if config.task == 'pretext':
+                pretext(
+                    dataset=config.dataset,
+                    timestamp=timestamp,
+                    subdata=subdata,
+                    scheme=config.carla_scheme,
+                    mix_step=config.mix_step,
+                    dataloader_shuffle=config.dataloader_shuffle,
+                    gpu_num=config.gpu_num,
+                    cut_negative_pairs=config.cut_negative_pairs,
+                )
 
-            logging.info(f'- True Positives: {best_tp}')
-            logging.info(f'- False Positives: {best_fp}')
-            logging.info(f'- False Negatives: {best_fn}\n')
-    
-    else:
-        pretext(
-            dataset=config.dataset,
-            timestamp=timestamp,
-            scheme=config.scheme,
-            mix_step=config.mix_step,
-            dataloader_shuffle=config.dataloader_shuffle,
-            gpu_num=config.gpu_num,
-            cut_negative_pairs=config.cut_negative_pairs,
-        )
-        best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
-            dataset=config.dataset,
-            timestamp=timestamp,
-            scheme=config.scheme,
-            dataloader_shuffle=config.dataloader_shuffle,
-            gpu_num=config.gpu_num
-        )
-        best_f1_list.append(best_f1_score)
-        best_tp_list.append(best_tp)
-        best_fp_list.append(best_fp)
-        best_fn_list.append(best_fn)
-        auc_pr_list.append(auc_pr)
+            elif config.task == 'classification':
+                best_f1_score, best_tp, best_fp, best_fn, auc_pr = \
+                    classification(
+                        dataset=config.dataset,
+                        timestamp=timestamp,
+                        subdata=subdata,
+                        scheme=config.carla_scheme,
+                        dataloader_shuffle=config.dataloader_shuffle,
+                        gpu_num=config.gpu_num
+                    )
+                logging.info(f'- True Positives: {best_tp}')
+                logging.info(f'- False Positives: {best_fp}')
+                logging.info(f'- False Negatives: {best_fn}\n')
 
-        logging.info(f'- True Positives: {best_tp}')
-        logging.info(f'- False Positives: {best_fp}')
-        logging.info(f'- False Negatives: {best_fn}\n')
+            elif config.task == 'carla_all':
+                pretext(
+                    dataset=config.dataset,
+                    timestamp=timestamp,
+                    subdata=subdata,
+                    scheme=config.carla_scheme,
+                    mix_step=config.mix_step,
+                    dataloader_shuffle=config.dataloader_shuffle,
+                    gpu_num=config.gpu_num,
+                    cut_negative_pairs=config.cut_negative_pairs,
+                )
+                best_f1_score, best_tp, best_fp, best_fn, auc_pr = \
+                    classification(
+                        dataset=config.dataset,
+                        timestamp=timestamp,
+                        subdata=subdata,
+                        scheme=config.carla_scheme,
+                        dataloader_shuffle=config.dataloader_shuffle,
+                        gpu_num=config.gpu_num
+                    )
+                best_f1_list.append(best_f1_score)
+                best_tp_list.append(best_tp)
+                best_fp_list.append(best_fp)
+                best_fn_list.append(best_fn)
+                auc_pr_list.append(auc_pr)
 
-    best_f1_list = np.array(best_f1_list)
-    best_tp_list = np.array(best_tp_list)
-    best_fp_list = np.array(best_fp_list)
-    best_fn_list = np.array(best_fn_list)
-    auc_pr_list = np.array(auc_pr_list)
-
-    f1_score_best = np.max(best_f1_list)
-    precision, recall, f1_micro = mirco_f1(
-        tp_list=best_tp_list,
-        fp_list=best_fp_list,
-        fn_list=best_fn_list
-    )    
-    auc_pr_mean = np.mean(auc_pr_list)
-    auc_pr_std = np.std(auc_pr_list)
-    f1_macro = macro_f1(f1_list=best_f1_list)
-
-    logging.info('Scores')
-    logging.info(f'- Best F1: {round(f1_score_best, 4)}')
-    logging.info(f'- Micro F1: {round(f1_micro, 4)}')
-    logging.info(f'- Precision: {round(precision, 4)}')
-    logging.info(f'- Recall: {round(recall, 4)}')
-    logging.info(f'- AUC-PR mean: {round(auc_pr_mean, 4)}')
-    logging.info(f'- AUC-PR std: {round(auc_pr_std, 4)}')
-    logging.info(f'- Macro F1: {round(f1_macro, 4)}')
+                logging.info(f'- True Positives: {best_tp}')
+                logging.info(f'- False Positives: {best_fp}')
+                logging.info(f'- False Negatives: {best_fn}\n')
         
+            elif config.task == 'vae_train':
+                vae_train(
+                    dataset=config.dataset,
+                    subdata=subdata,
+                    depth=config.vae_depth,
+                    gpu_num=config.gpu_num,
+                )
+
+        if config.task in ['classification', 'carla_all']:
+            best_f1_list = np.array(best_f1_list)
+            best_tp_list = np.array(best_tp_list)
+            best_fp_list = np.array(best_fp_list)
+            best_fn_list = np.array(best_fn_list)
+            auc_pr_list = np.array(auc_pr_list)
+
+            f1_score_best = np.max(best_f1_list)
+            precision, recall, f1_micro = mirco_f1(
+                tp_list=best_tp_list,
+                fp_list=best_fp_list,
+                fn_list=best_fn_list
+            )
+            auc_pr_mean = np.mean(auc_pr_list)
+            auc_pr_std = np.std(auc_pr_list)
+            f1_macro = macro_f1(f1_list=best_f1_list)
+
+            logging.info('Scores')
+            logging.info(f'- Best F1: {round(f1_score_best, 4)}')
+            logging.info(f'- Micro F1: {round(f1_micro, 4)}')
+            logging.info(f'- Precision: {round(precision, 4)}')
+            logging.info(f'- Recall: {round(recall, 4)}')
+            logging.info(f'- AUC-PR mean: {round(auc_pr_mean, 4)}')
+            logging.info(f'- AUC-PR std: {round(auc_pr_std, 4)}')
+            logging.info(f'- Macro F1: {round(f1_macro, 4)}')

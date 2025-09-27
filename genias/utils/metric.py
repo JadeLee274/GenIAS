@@ -1,8 +1,9 @@
 import re
 from sklearn.metrics import precision_recall_curve, auc
-from utils.common_import import *
-from data_factory.loader import ClassificationDataset
-from carla.model import ClassificationModel
+from genias.utils.common_import import *
+from genias.data_factory.loader import ClassificationDataset
+from genias.models.carla import ClassificationModel
+from genias.utils.main import fix_seed_all
 
 
 ######################### Metrics for CARLA inference ######################### 
@@ -122,7 +123,8 @@ def auc_pr_statistics(auc_pr_list: List[float]) -> Tuple[float, float]:
 def inference(
     dataset: str,
     gpu_num: int,
-    pretext_scheme: str,
+    carla_scheme: str,
+    time: str,
     seed: int = 42,
 ) -> None:
     """
@@ -130,15 +132,17 @@ def inference(
     function, you can get informations on F1 scores, AUC-PR.
 
     Parameters:
-        dataset:        Name of dataset.
-        gpu_num:        The inference will be done on this GPU.
-        pretext_scheme: What scheme was applied for pretext.
-        seed:           The seed will be fixed. Default 42.
+        dataset: Name of dataset.
+        gpu_num: The inference will be done on this GPU.
+        scheme:  What scheme was applied for pretext.
+        time:    The start time of the model train & inference process.
+        seed:    The seed will be fixed. Default 42.
     """
-    assert pretext_scheme in ['carla', 'genias', 'shuffle'], \
-    "pretext_scheme must be either 'carla', 'genias', 'shuffle'"
+    assert carla_scheme in [
+        'carla_original', 'genias', 'mix', 'genias_multiple'
+    ], "'carla_original', 'genias', 'mix', 'genias_multiple"
 
-    seed_fix(sedd=seed, mode='all')
+    fix_seed_all(seed=seed)
 
     device = torch.device(f'cuda:{gpu_num}')
 
@@ -148,22 +152,94 @@ def inference(
     best_fn_list = []
     auc_pr_list = []
 
-    data_list = sorted(os.listdir(f'data/{dataset}/test'))
-    data_list = [f.replace('.npy', '') for f in data_list]
+    ckpt_path = os.path.join(
+        'genias', 'checkpoints', 'classification', dataset
+    )
 
-    for subdata in data_list:
+    if dataset in ['MSL', 'SMAP', 'SMD', 'KPI', 'Yahoo-A1']:
+        data_list = sorted(os.listdir(f'data/{dataset}/test'))
+        data_list = [f.replace('.npy', '') for f in data_list]
+
+        for subdata in data_list:
+            test_set = ClassificationDataset(
+                dataset=dataset,
+                subdata=subdata,
+                mode='test',
+                scheme=carla_scheme,
+            )
+            data_dim = test_set.data_dim
+            model = ClassificationModel(in_channels=data_dim)
+            ckpt_path = os.path.join(ckpt_path, subdata, carla_scheme)
+            ckpt = torch.load(os.path.join(ckpt_path, f'{time}.pt'))
+            model.load_state_dict(ckpt['model'])
+            model = model.to(device)
+            model.eval()
+
+            logits = []
+
+            for test_data in test_set:
+                test_data = torch.tensor(test_data).float().to(device)
+                logit = model.forward(test_data.unsqueeze(0).transpose(-2, -1))
+                logit = logit.squeeze(0).detach().cpu().numpy()
+                logits.append(logit)
+            
+            classes = [0 for _ in range(10)]
+
+            for logit in logits:
+                max_idx = np.argmax(logit)
+                classes[max_idx] += 1
+            
+            major_class = classes.index(max(classes))
+
+            anomaly_scores = []
+
+            for logit in logits:
+                major_probability = logit[major_class]
+                anomaly_scores.append(1 - major_probability)
+            
+            anomaly_scores = np.array(anomaly_scores)
+
+            precision, recall, thresholds = precision_recall_curve(
+                y_true=test_set.labels,
+                y_score=anomaly_scores,
+            )
+
+            auc_pr = auc(recall, precision)
+
+            best_threshold = 0
+            best_f1 = 0
+
+            for i in range(len(thresholds)):
+                f1_score = f1score(precision[i], recall[i])
+                if f1_score > best_f1:
+                    best_f1 = f1_score
+                    best_threshold = thresholds[i]
+            
+            best_anomaly_prediction = np.where(
+                anomaly_scores >= best_threshold, 1, 0
+            )
+
+            best_f1_score, best_tp, best_fp, best_fn = f1_stat(
+                prediction=best_anomaly_prediction,
+                gt=test_set.labels,
+            )
+
+            best_f1_list.append(best_f1_score)
+            best_tp_list.append(best_tp)
+            best_fp_list.append(best_fp)
+            best_fn_list.append(best_fn)
+            auc_pr_list.append(auc_pr)
+    
+    else:
         test_set = ClassificationDataset(
             dataset=dataset,
-            subdata=subdata,
             mode='test',
-            pretext_scheme='carla',
+            scheme=carla_scheme,
         )
         data_dim = test_set.data_dim
         model = ClassificationModel(in_channels=data_dim)
-        ckpt_path = os.path.join(
-            'checkpoints', 'classification', dataset, subdata, pretext_scheme
-        )
-        ckpt = torch.load(os.path.join(ckpt_path, 'epoch_100.pt'))
+        ckpt_path = os.path.join(ckpt_path, subdata, carla_scheme)
+        ckpt = torch.load(os.path.join(ckpt_path, f'{time}.pt'))
         model.load_state_dict(ckpt['model'])
         model = model.to(device)
         model.eval()
@@ -222,7 +298,7 @@ def inference(
         best_fp_list.append(best_fp)
         best_fn_list.append(best_fn)
         auc_pr_list.append(auc_pr)
-    
+
     best_f1_list = np.array(best_f1_list)
     best_tp_list = np.array(best_tp_list)
     best_fp_list = np.array(best_fp_list)

@@ -1,4 +1,3 @@
 from .common_import import *
 from .loss import pretextloss, classificationloss, entropy
-from .set_logging import set_logging_filehandler
-from .fix_seed import fix_seed_all
+from .main import set_logging_filehandler, fix_seed_all
