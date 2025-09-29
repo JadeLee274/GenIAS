@@ -2,7 +2,7 @@ import random
 import logging
 from math import cos, pi
 import torch.optim as optim
-from .common_import import *
+from genias.utils.common_import import *
 
 
 def str2bool(v: str) -> bool:

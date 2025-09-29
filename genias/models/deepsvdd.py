@@ -1,4 +1,4 @@
-from utils.common_import import *
+from genias.utils.common_import import *
 
 
 class SVDD(nn.Module):

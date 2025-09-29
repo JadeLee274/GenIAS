@@ -1,9 +1,9 @@
 import re
 from sklearn.metrics import precision_recall_curve, auc
 from genias.utils.common_import import *
-from genias.data_factory.loader import ClassificationDataset
-from genias.models.carla import ClassificationModel
-from genias.utils.main import fix_seed_all
+from genias.utils.utils import *
+from genias.data_factory.loader import *
+from genias.models.carla import *
 
 
 ######################### Metrics for CARLA inference ######################### 

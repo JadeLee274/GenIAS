@@ -1,4 +1,5 @@
 import pandas as pd
+import polars as pl
 from genias.utils.common_import import *
 from genias.utils.preprocess import *
 from genias.models.vae import VAE
@@ -68,8 +69,8 @@ class PretextDataset(object):
         self.window_size = window_size
 
         assert scheme in [
-            'carla_original', 'genias', 'mix', 'genias_multiple'
-        ], "'carla_original', 'genias', 'mix', 'genias_multiple'"
+            'carla', 'genias', 'mix', 'genias_multiple'
+        ], "'carla', 'genias', 'mix', 'genias_multiple'"
 
         self.scheme = scheme
         self.mix_step = mix_step
@@ -110,7 +111,7 @@ class PretextDataset(object):
         positive_pairs = []
 
         for idx in range(self.anchors.shape[0]):
-            if self.scheme in ['carla_original', 'genias', 'mix']:
+            if self.scheme in ['carla', 'genias', 'mix']:
                 if idx < 10:
                     positive_pair = self.anchors[idx]
                     positive_pair = noise_transformation(positive_pair)
@@ -146,7 +147,7 @@ class PretextDataset(object):
     def _get_negative_pairs(self) -> None:
         anomaly_injection = AnomalyInjection()
 
-        if self.scheme != 'carla_original':
+        if self.scheme != 'carla':
             vae = VAE(
                 window_size=self.window_size,
                 data_dim=self.data_dim,
@@ -173,7 +174,7 @@ class PretextDataset(object):
             anchor = self.anchors[idx]
             _anchor = torch.tensor(anchor).float().unsqueeze(0)
 
-            if self.scheme == 'carla_original':
+            if self.scheme == 'carla':
                 negative_pair = anomaly_injection(anchor)
             
             elif self.scheme == 'genias':
@@ -270,8 +271,8 @@ class ClassificationDataset(object):
         self.mode = mode
 
         assert scheme in [
-            'carla_original', 'genias', 'mix', 'genias_multiple'
-        ], "'carla_original', 'genias', 'mix', 'genias_multiple'"
+            'carla', 'genias', 'mix', 'genias_multiple'
+        ], "'carla', 'genias', 'mix', 'genias_multiple'"
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
             data_dir = os.path.join('genias', 'data', 'dataset', dataset)

@@ -1,5 +1,6 @@
 import random
 import pandas as pd
+import polars as pl
 from genias.utils.common_import import *
 
 
@@ -22,15 +23,15 @@ def get_labels(dataset: str) -> None:
     this function gets the anomaly label for each test data by reading the .csv
     file.
     """
-    data_path = f'data/{dataset}'
-    csv_dir = f'{data_path}/labeled_anomalies.csv'
-    label_dir = f'{data_path}/label'
+    data_dir = os.path.join('genias', 'data', 'dataset', dataset)
+    csv_dir = os.path.join(data_dir, 'labeled_anomalies.csv')
+    label_dir = os.path.join(data_dir, 'label')
     os.makedirs(label_dir, exist_ok=True)
     
     df = pd.read_csv(csv_dir)
     data_df = df[df['spacecraft'] == dataset]
     
-    data_list = sorted(os.listdir(f'{data_path}/test'))
+    data_list = sorted(os.listdir(f'{data_dir}/test'))
     data_list = [data.replace('.npy', '') for data in data_list]
 
     for subdata in data_list:
@@ -57,7 +58,7 @@ def get_labels(dataset: str) -> None:
     return None
 
 
-def txt_to_npy(data_path: str) -> None:
+def txt_to_npy(txt_path: str) -> None:
     """
     Converts .txt file to .npy file.
 
@@ -68,45 +69,62 @@ def txt_to_npy(data_path: str) -> None:
     file can be given as .txt files. This function convert such files to .npy 
     files.
     """
-    train_path = f'{data_path}/train'
-    test_path = f'{data_path}/test'
-    label_path = f'{data_path}/label'
+    train_path = os.path.join(txt_path, 'train')
+    test_path = os.path.join(txt_path, 'test')
+    label_path = os.path.join(txt_path, 'label')
+
     train_list = sorted(os.listdir(train_path))
     test_list = sorted(os.listdir(test_path))
     label_list = sorted(os.listdir(label_path))
 
     for train_txt in train_list:
         lines = []
-        with open(f'{train_path}/{train_txt}', 'r', encoding='utf-8') as f:
+        with open(
+            os.path.join(train_path, train_txt), 'r', encoding='utf-8'
+        ) as f:
             for line in f:
                 values = line.strip().split(',')
                 line = [float(value) for value in values]
                 lines.append(line)
         train_npy = np.array(lines, dtype=np.float32)
         data_name = train_txt.replace('.txt', '.npy')
-        np.save(file=f'{train_path}/{data_name}', arr=train_npy)
+        np.save(file=os.path.join(train_path, data_name), arr=train_npy)
     
     for test_txt in test_list:
         lines = []
-        with open(f'{test_path}/{test_txt}', 'r', encoding='utf-8') as f:
+        with open(
+            os.path.join(test_path, test_txt), 'r', encoding='utf-8'
+        ) as f:
             for line in f:
                 values = line.strip().split(',')
                 line = [float(value) for value in values]
                 lines.append(line)
         test_npy = np.array(lines, dtype=np.float32)
         data_name = test_txt.replace('.txt', '.npy')
-        np.save(file=f'{test_path}/{data_name}', arr=test_npy)
+        np.save(file=os.path.join(test_path, data_name), arr=test_npy)
     
     for label_txt in label_list:
         labels = []
-        with open(f'{label_path}/{label_txt}', 'r', encoding='utf-8') as f:
+        with open(
+            os.path.join(label_path, label_txt), 'r', encoding='utf-8'
+        ) as f:
             for label in f:
                 labels.append(int(label))
         label_npy = np.array(labels, dtype=np.int32).reshape(-1)
         data_name = label_txt.replace('.txt', '.npy')
-        np.save(file=f'{label_path}/{data_name}', arr=label_npy)
+        np.save(file=os.path.join(label_path, data_name), arr=label_npy)
 
     print('Converted all .txt files to .npy')
+
+    return
+
+
+def csv_to_pq(csv_path: str) -> None:
+    csv_list = [csv for csv in os.listdir(csv_path) if csv.endswith('.csv')]
+    csv_list = [csv.replace('csv', '') for csv in csv_list]
+    for csv in csv_list:
+        csv_df = pl.read_csv(os.path.join(csv_path, csv))
+        csv_df.write_parquet(os.path.join())
 
     return
 

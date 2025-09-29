@@ -2,15 +2,8 @@ import warnings
 from torch.nn.utils import weight_norm
 from genias.utils.common_import import *
 warnings.filterwarnings('ignore')
-"""
-Codes for TCN-VAE. This code follows the paper
-GenIAS: Generator for Instantiating Anomalies in Time Series,
-Darban et al., 2025
 
-Paper link: https://arxiv.org/pdf/2502.08262
 
-Default values of arguments follow the paper.
-"""
 class Chomp1d(nn.Module):
     """
     Discard the features of input.
