@@ -57,22 +57,26 @@ class PretextDataset(object):
     def __init__(
         self,
         dataset: str,
+        timestamp: str,
         subdata: Optional[str] = None,
         window_size: int = 200,
         scheme: str = 'carla',
+        inject_different_anomalies: bool = False,
         mix_step: Optional[int] = None,
         num_pairs: int = 3,
         cut_negative_pairs: bool = True,
     ) -> None:
         self.dataset = dataset
+        self.timestamp = timestamp
         self.subdata = subdata
         self.window_size = window_size
 
         assert scheme in [
-            'carla', 'genias', 'mix', 'genias_multiple'
-        ], "'carla', 'genias', 'mix', 'genias_multiple'"
+            'carla', 'carla_modified', 'genias', 'mix', 'genias_multiple'
+        ], "'carla', 'carla_modified', 'genias', 'mix', 'genias_multiple'"
 
         self.scheme = scheme
+        self.inject_different_anomalies = inject_different_anomalies
         self.mix_step = mix_step
         self.num_pairs = num_pairs
         self.cut_negative_pairs = cut_negative_pairs
@@ -111,7 +115,7 @@ class PretextDataset(object):
         positive_pairs = []
 
         for idx in range(self.anchors.shape[0]):
-            if self.scheme in ['carla', 'genias', 'mix']:
+            if self.scheme in ['carla', 'carla_modified', 'genias', 'mix']:
                 if idx < 10:
                     positive_pair = self.anchors[idx]
                     positive_pair = noise_transformation(positive_pair)
@@ -145,9 +149,12 @@ class PretextDataset(object):
         return
     
     def _get_negative_pairs(self) -> None:
-        anomaly_injection = AnomalyInjection()
+        anomaly_injection = AnomalyInjection(
+            scheme=self.scheme,
+            inject_different_anomalies=self.inject_different_anomalies,
+        )
 
-        if self.scheme != 'carla':
+        if self.scheme not in ['carla', 'carla_modified']:
             vae = VAE(
                 window_size=self.window_size,
                 data_dim=self.data_dim,
@@ -174,7 +181,7 @@ class PretextDataset(object):
             anchor = self.anchors[idx]
             _anchor = torch.tensor(anchor).float().unsqueeze(0)
 
-            if self.scheme == 'carla':
+            if self.scheme in ['carla', 'carla_modified']:
                 negative_pair = anomaly_injection(anchor)
             
             elif self.scheme == 'genias':
@@ -234,7 +241,9 @@ class PretextDataset(object):
             self._negative_pairs = self.negative_pairs
 
         np.save(
-            file=os.path.join(negative_dir, 'negative_pairs.npy'),
+            file=os.path.join(
+                negative_dir, f'negative_pairs_{self.timestamp}.npy'
+            ),
             arr=self._negative_pairs,
         )
 
@@ -256,6 +265,7 @@ class ClassificationDataset(object):
     def __init__(
         self,
         dataset: str,
+        timestamp: str,
         subdata: Optional[str] = None,
         window_size: int = 200,
         mode: str = 'train',
@@ -271,42 +281,42 @@ class ClassificationDataset(object):
         self.mode = mode
 
         assert scheme in [
-            'carla', 'genias', 'mix', 'genias_multiple'
-        ], "'carla', 'genias', 'mix', 'genias_multiple'"
+            'carla', 'carla_modified', 'genias', 'mix', 'genias_multiple'
+        ], "'carla', 'carla_modified', 'genias', 'mix', 'genias_multiple'"
+        data_dir = os.path.join('genias', 'data', 'dataset', dataset)
 
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            data_dir = os.path.join('genias', 'data', 'dataset', dataset)
-            if mode == 'train':
-                data = np.load(
-                    os.path.join(data_dir, 'train', f'{subdata}.npy')
-                )
-            elif mode == 'test':
-                data = np.load(
-                    os.path.join(data_dir, 'test', f'{subdata}.npy')
-                )
-                labels = np.load(
-                    os.path.join(data_dir, 'label', f'{subdata}.npy')
-                )
+            self.train_data = np.load(
+                os.path.join(data_dir, 'train', f'{subdata}.npy')
+            )
+            self.test_data = np.load(
+                os.path.join(data_dir, 'test', f'{subdata}.npy')
+            )
+            self.test_labels = np.load(
+                os.path.join(data_dir, 'label', f'{subdata}.npy')
+            )
         
         elif dataset == 'SWaT':
-            if mode == 'train':
-                data_path = os.path.join('data', dataset)
-                data = pd.read_csv(os.path.join(data_path, 'SWaT_Normal.csv'))
-                data.drop(
-                    columns=[' Timestamp', 'Normal/Attack'],
-                    inplace=True,
-                )
-                data = data.values[:, 1:]
-            elif mode == 'test':
-                data = pd.read_csv(f'data/{dataset}/SWaT_Abormal.csv')
-                data.drop(columns=[' Timestamp'], inplace=True)
-                data = data.values
-                labels = data[:, -1]
-                data = data[:, :-1]
-                labels = np.where(labels == 'Normal', 0, 1)
+            train_data = pd.read_csv(
+                os.path.join(data_dir, 'SWaT_Normal.csv')
+            )
+            train_data.drop(
+                columns=[' Timestamp', 'Normal/Attack'],
+                inplace=True,
+            )
+            self.train_data = train_data.values[:, 1:]
+
+            test_data = pd.read_csv(
+                os.path.join(data_dir, 'SWaT_Abormal.csv')
+            )
+            test_data.drop(columns=[' Timestamp'], inplace=True)
+            test_data = test_data.values
+            labels = test_data[:, -1]
+            self.test_data = test_data[:, :-1]
+            self.test_labels = np.where(labels == 'Normal', 0, 1)
         
-        self.data_dim = data.shape[-1]
-        self.mean, self.std = get_mean_std(x=data)
+        self.data_dim = self.train_data.shape[-1]
+        self.mean, self.std = get_mean_std(x=self.train_data)
         self.std = np.where(self.std == 0.0, 1.0, self.std)
 
         classification_dir = os.path.join(
@@ -319,9 +329,11 @@ class ClassificationDataset(object):
         classification_dir = os.path.join(classification_dir, scheme)
         
         if mode == 'train':
-            anchors = convert_to_windows(data, window_size)
+            anchors = convert_to_windows(self.train_data, window_size)
             negative_pairs = np.load(
-                os.path.join(classification_dir, 'negative_pairs.npy')
+                os.path.join(
+                    classification_dir, f'negative_pairs_{timestamp}.npy'
+                )
             )
             if scheme == 'genias_multiple':
                 _negative_pairs = []
@@ -345,10 +357,14 @@ class ClassificationDataset(object):
 
             # Load indices for nearest neighborhoods.
             anchor_nn_indices = np.load(
-                os.path.join(classification_dir, 'anchor_nn_indices.npy')
+                os.path.join(
+                    classification_dir, f'anchor_nn_indices_{timestamp}.npy'
+                )
             )
             negative_nn_indices = np.load(
-                os.path.join(classification_dir, 'negative_nn_indices.npy')
+                os.path.join(
+                    classification_dir, f'negative_nn_indices_{timestamp}.npy'
+                )
             )
 
             # Make arrays consisting of nearest neighborhood of anchors.
@@ -388,10 +404,14 @@ class ClassificationDataset(object):
             
             # Load indices for furthest neighborhoods.
             anchor_fn_indices = np.load(
-                os.path.join(classification_dir, 'anchor_fn_indices.npy')
+                os.path.join(
+                    classification_dir, f'anchor_fn_indices_{timestamp}.npy'
+                )
             )
             negative_fn_indices = np.load(
-                os.path.join(classification_dir, 'negative_fn_indices.npy')
+                os.path.join(
+                    classification_dir, f'negative_fn_indices_{timestamp}.npy'
+                )
             )
 
             # Make arrays consisting of furthest neighborhood of anchors.
@@ -429,8 +449,8 @@ class ClassificationDataset(object):
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
 
         elif mode == 'test':
-            self.windows = convert_to_windows(data, window_size)
-            labels = convert_to_windows(labels, window_size)
+            self.windows = convert_to_windows(self.test_data, window_size)
+            labels = convert_to_windows(self.test_labels, window_size)
 
             window_labels = []
             for label in labels:
@@ -439,7 +459,7 @@ class ClassificationDataset(object):
                 else:
                     window_labels.append(0)
             
-            self.labels = np.array(window_labels).reshape(-1)
+            self.test_labels = np.array(window_labels).reshape(-1)
 
         return
 

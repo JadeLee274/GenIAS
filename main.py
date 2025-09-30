@@ -10,6 +10,7 @@ def main(
     start_subdata: Optional[str] = None,
     pretext_timestamp: Optional[str] = None,
     pretext_scheme: str = 'carla',
+    inject_different_anomalies: bool = False,
     use_pretrained_vae: bool = True,
     mix_step: int = 50,
     cut_negative_pairs: bool = True,
@@ -34,10 +35,11 @@ def main(
     if task != 'vae_train':
         assert pretext_scheme in [
             'carla',
+            'carla_modified',
             'genias',
             'mix',
             'genias_multiple'
-        ], "'carla', 'genias', 'mix', 'genias_multiple'"
+        ], "'carla', 'carla_modified', 'genias', 'mix', 'genias_multiple'"
 
     fix_seed_all(seed=seed)
 
@@ -62,7 +64,7 @@ def main(
 
     set_logging_filehandler(log_file_path=log_file_path)
 
-    logging.info(f'Experiment: {exp_name}\n')
+    logging.info(f'Experiment: {exp_name.replace('_', ' ')}\n')
     logging.info(f'Settings:')
     logging.info(f'- Task: {task}')
     logging.info(f'- Date: {timestamp.replace('_', ' ')}')
@@ -84,7 +86,8 @@ def main(
         logging.info(
             f'- Cut negative pairs: {cut_negative_pairs}')
 
-    logging.info(f'- GPU number: {gpu_num}\n')
+    logging.info(f'- GPU number: {gpu_num}')
+    logging.info(f'- Seed: {seed}\n')
 
     best_f1_list = []
     best_tp_list = []
@@ -110,6 +113,7 @@ def main(
                     timestamp=timestamp,
                     subdata=subdata,
                     scheme=pretext_scheme,
+                    inject_different_anomalies=inject_different_anomalies,
                     use_pretrained_vae=use_pretrained_vae,
                     mix_step=mix_step,
                     batch_size=batch_size,
@@ -137,6 +141,7 @@ def main(
                     timestamp=timestamp,
                     subdata=subdata,
                     scheme=pretext_scheme,
+                    inject_different_anomalies=inject_different_anomalies,
                     use_pretrained_vae=use_pretrained_vae,
                     mix_step=mix_step,
                     batch_size=batch_size,
@@ -170,7 +175,7 @@ def main(
                     gpu_num=gpu_num,
                 )
 
-        if task in ['classification', 'pretext_and_classification']:
+        if task in ['classification', 'pretext_classification']:
             best_f1_list = np.array(best_f1_list)
             best_tp_list = np.array(best_tp_list)
             best_fp_list = np.array(best_fp_list)
@@ -237,9 +242,18 @@ if __name__ == '__main__':
         '--pretext-scheme',
         type=str,
         help="If 'carla', customized algorithm generates anomaly."\
+        "If 'carla_modified', modified CARLA anomaly algorithm is applied."\
         "If 'genias', the VAE generates anomaly."\
         "If 'mix', the algorithm and VAE alternately generate anomaly."\
         "If 'genias_multiple', the multiple anomalies from VAE is used."
+    )
+    args.add_argument(
+        '--inject-different-anomalies',
+        type=str2bool,
+        default=False,
+        help="For the 'carla' and 'carla_modified' schemes."\
+        "Applies different types of anomalies to each dimension of window."\
+        "Default False."
     )
     args.add_argument(
         '--use-pretrained-vae',
@@ -297,6 +311,7 @@ if __name__ == '__main__':
         start_subdata=config.start_subdata,
         pretext_timestamp=config.pretext_timestamp,
         pretext_scheme=config.pretext_scheme,
+        inject_different_anomalies=config.inject_different_anomalies,
         use_pretrained_vae=config.use_pretrained_vae,
         mix_step=config.mix_step,
         cut_negative_pairs=config.cut_negative_pairs,

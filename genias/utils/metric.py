@@ -139,8 +139,8 @@ def inference(
         seed:    The seed will be fixed. Default 42.
     """
     assert carla_scheme in [
-        'carla_original', 'genias', 'mix', 'genias_multiple'
-    ], "'carla_original', 'genias', 'mix', 'genias_multiple"
+        'carla', 'genias', 'mix', 'genias_multiple'
+    ], "'carla', 'genias', 'mix', 'genias_multiple"
 
     fix_seed_all(seed=seed)
 
@@ -157,7 +157,7 @@ def inference(
     )
 
     if dataset in ['MSL', 'SMAP', 'SMD', 'KPI', 'Yahoo-A1']:
-        data_list = sorted(os.listdir(f'data/{dataset}/test'))
+        data_list = sorted(os.listdir(f'genias/data/dataset/{dataset}/test'))
         data_list = [f.replace('.npy', '') for f in data_list]
 
         for subdata in data_list:
@@ -169,8 +169,8 @@ def inference(
             )
             data_dim = test_set.data_dim
             model = ClassificationModel(in_channels=data_dim)
-            ckpt_path = os.path.join(ckpt_path, subdata, carla_scheme)
-            ckpt = torch.load(os.path.join(ckpt_path, f'{time}.pt'))
+            _ckpt_path = os.path.join(ckpt_path, subdata, carla_scheme)
+            ckpt = torch.load(os.path.join(_ckpt_path, f'{time}.pt'))
             model.load_state_dict(ckpt['model'])
             model = model.to(device)
             model.eval()
@@ -200,7 +200,7 @@ def inference(
             anomaly_scores = np.array(anomaly_scores)
 
             precision, recall, thresholds = precision_recall_curve(
-                y_true=test_set.labels,
+                y_true=test_set.test_labels,
                 y_score=anomaly_scores,
             )
 
@@ -221,7 +221,7 @@ def inference(
 
             best_f1_score, best_tp, best_fp, best_fn = f1_stat(
                 prediction=best_anomaly_prediction,
-                gt=test_set.labels,
+                gt=test_set.test_labels,
             )
 
             best_f1_list.append(best_f1_score)
@@ -269,7 +269,7 @@ def inference(
         anomaly_scores = np.array(anomaly_scores)
 
         precision, recall, thresholds = precision_recall_curve(
-            y_true=test_set.labels,
+            y_true=test_set.test_labels,
             y_score=anomaly_scores,
         )
 
@@ -290,7 +290,7 @@ def inference(
 
         best_f1_score, best_tp, best_fp, best_fn = f1_stat(
             prediction=best_anomaly_prediction,
-            gt=test_set.labels,
+            gt=test_set.test_labels,
         )
 
         best_f1_list.append(best_f1_score)

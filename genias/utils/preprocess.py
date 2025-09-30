@@ -309,8 +309,16 @@ class AnomalyInjection(object):
     This is a modified version of SubAnomaly in CARLA code.
     This if for injectind anomaly to the normal window.
     """
-    def __init__(self, portion_len: float = 0.99) -> None:
-        self.portion_len = portion_len
+    def __init__(
+        self,
+        scheme: str = 'carla',
+        inject_different_anomalies: bool = False
+    ) -> None:
+        assert scheme in ['carla', 'carla_modified'], \
+        "'carla', 'carla_modified'"
+        self.scheme = scheme
+        self.inject_different_anomalies = inject_different_anomalies
+
         return
     
     def inject_anomaly(
@@ -325,7 +333,8 @@ class AnomalyInjection(object):
         shapelet_factor: bool = False,
     ) -> Matrix:
         """
-        
+        Anomaly injection code for CARLA.
+
         Parameters:
             window:             The window that the anomaly will be injected.
 
@@ -365,34 +374,44 @@ class AnomalyInjection(object):
             shapelet_factor:    Whether or not to add shapelet anomaly.
                                 Default False.
         """
-        window = window.copy()
+        _window = window.copy()
 
         if subsequence_length is None:
-            min_len = int(window.shape[0] * 0.1)
-            max_len = int(window.shape[0] * 0.9)
+            min_len = int(_window.shape[0] * 0.1)
+            max_len = int(_window.shape[0] * 0.9)
             subsequence_length = np.random.randint(min_len, max_len)
 
         if compression_factor is None:
             compression_factor = np.random.randint(2, 5)
 
         if scale_factor is None:
-            scale_factor = np.random.uniform(0.1, 2.0, window.shape[1])
+            scale_factor = np.random.uniform(0.1, 2.0, _window.shape[1])
         
         if start_idx is None:
-            start_idx = np.random.randint(0, len(window) - subsequence_length)
+            start_idx = np.random.randint(0, len(_window) - subsequence_length)
         
-        end_idx = min(start_idx + subsequence_length, window.shape[0])
+        end_idx = min(start_idx + subsequence_length, _window.shape[0])
 
-        if trend_end:
-            end_idx = window.shape[0]
+        if (self.scheme == 'carla' and trend_end):
+            end_idx = _window.shape[0]
 
-        degraded_subsequence = window[start_idx: end_idx]
+        degraded_subsequence = _window[start_idx: end_idx]
         degraded_subsequence = np.tile(
             A=degraded_subsequence,
             reps=(compression_factor, 1)
         )
         degraded_subsequence = degraded_subsequence[::compression_factor]
-        degraded_subsequence = degraded_subsequence * scale_factor
+        
+        if self.scheme == 'carla':
+            degraded_subsequence = degraded_subsequence * scale_factor
+
+        elif self.scheme == 'carla_modified':
+            if _window.std() == 0:
+                _scale_factor = np.random.choice([-3, -2, -1, 1, 2, 3])
+                degraded_subsequence = degraded_subsequence + _scale_factor
+            else:
+                _scale_factor = scale_factor        
+                degraded_subsequence = degraded_subsequence * _scale_factor
 
         if trend_factor is None:
             trend_factor = np.random.normal(1, 0.5)
@@ -403,15 +422,22 @@ class AnomalyInjection(object):
         if random_float < 0.5:
             trend_coef = -1
         
-        degraded_subsequence = degraded_subsequence + trend_coef * trend_factor
+        if self.scheme == 'carla':
+            degraded_subsequence = degraded_subsequence \
+                                   + trend_coef * trend_factor
+
+        elif self.scheme == 'carla_modified':
+            trend_anomaly_vector = np.random.randn(end_idx - start_idx, 1)
+            degraded_subsequence = degraded_subsequence + \
+            + trend_anomaly_vector * trend_coef * trend_factor
 
         if shapelet_factor:
-            degraded_subsequence = window[start_idx] \
-            + (np.random.random_sample(window[start_idx].shape) * 0.1)
+            degraded_subsequence = _window[start_idx] \
+            + (np.random.random_sample(_window[start_idx].shape) * 0.1)
 
-        window[start_idx: end_idx] = degraded_subsequence
+        _window[start_idx: end_idx] = degraded_subsequence
 
-        return np.squeeze(window)
+        return np.squeeze(_window)
     
     def __call__(self, x: Matrix) -> Matrix:
         window = x.copy()
@@ -432,13 +458,19 @@ class AnomalyInjection(object):
             'trend'
         ]
 
-        anomaly_type = random.choice(anomaly_types)
+        if not self.inject_different_anomalies:
+            anomaly_type = random.choice(anomaly_types)
 
         if window.ndim > 1:
             num_features = window.shape[1]
             num_dims = np.random.randint(num_features//10, num_features//2)
+
             for _ in range(num_dims):
                 i = np.random.randint(0, num_features)
+            
+                if self.inject_different_anomalies:
+                    anomaly_type = random.choice(anomaly_types)
+            
                 temp_window = window[:, i].reshape(window.shape[0], 1)
 
                 if anomaly_type == 'global':

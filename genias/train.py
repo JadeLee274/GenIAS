@@ -12,6 +12,7 @@ def pretext(
     timestamp: str,
     subdata: Optional[str] = None,
     scheme: str = 'carla',
+    inject_different_anomalies: bool = False,
     use_pretrained_vae: bool = True,
     mix_step: Optional[int] = None,
     epochs: int = 30,
@@ -23,10 +24,11 @@ def pretext(
 ) -> None:
     assert scheme in [
         'carla',
+        'carla_modified',
         'genias',
         'mix',
         'genias_multiple',
-    ], "'carla', 'genias', 'mix', 'genias_multiple', 'carla_temp'"
+    ], "'carla', 'carla_modified', 'genias', 'mix', 'genias_multiple'"
 
     if (scheme != 'carla' and not use_pretrained_vae):
         vae_train(
@@ -39,8 +41,10 @@ def pretext(
 
     train_dataset = PretextDataset(
         dataset=dataset,
+        timestamp=timestamp,
         subdata=subdata,
         scheme=scheme,
+        inject_different_anomalies=inject_different_anomalies,
         mix_step=mix_step,
         cut_negative_pairs=cut_negative_pairs,
     )
@@ -134,7 +138,7 @@ def pretext(
     )
 
     logging.info('')
-    logging.info(f'Pretext training on {dataset} {subdata} finished.')
+    logging.info(f'Pretext training on {dataset} {subdata} finished.\n')
 
     print(f'Start saving top-{num_neighbors} neighbors...')
     model.eval()
@@ -203,11 +207,15 @@ def pretext(
     nearest_indices_list = np.array(nearest_indices_list)
     furthest_indices_list = np.array(furthest_indices_list)
     np.save(
-        file=os.path.join(classification_dir, 'anchor_nn_indices.npy'),
+        file=os.path.join(
+            classification_dir, f'anchor_nn_indices_{timestamp}.npy'
+        ),
         arr=nearest_indices_list,
     )
     np.save(
-        file=os.path.join(classification_dir, 'anchor_fn_indices.npy'),
+        file=os.path.join(
+            classification_dir, f'anchor_fn_indices_{timestamp}.npy'
+        ),
         arr=furthest_indices_list,
     )
 
@@ -228,11 +236,15 @@ def pretext(
     nearest_indices_list = np.array(nearest_indices_list)
     furthest_indices_list = np.array(furthest_indices_list)
     np.save(
-        file=os.path.join(classification_dir, 'negative_nn_indices.npy'),
+        file=os.path.join(
+            classification_dir, f'negative_nn_indices_{timestamp}.npy'
+        ),
         arr=nearest_indices_list,
     )
     np.save(
-        file=os.path.join(classification_dir, 'negative_fn_indices.npy'),
+        file=os.path.join(
+            classification_dir, f'negative_fn_indices_{timestamp}.npy'
+        ),
         arr=furthest_indices_list,
     )
 
@@ -253,13 +265,14 @@ def classification(
     cut_negative_pairs: bool = True,
 ) -> Tuple[float, int, int, int, float]:
     assert scheme in [
-        'carla', 'genias', 'mix', 'genias_multiple'
-    ], "'carla', 'genias', 'mix', 'genias_multiple'"
+        'carla', 'carla_modified', 'genias', 'mix', 'genias_multiple'
+    ], "'carla', 'carla_modified', 'genias', 'mix', 'genias_multiple'"
 
     device = torch.device(f'cuda:{gpu_num}')
 
     train_dataset = ClassificationDataset(
         dataset=dataset,
+        timestamp=timestamp,
         subdata=subdata,
         mode='train',
         scheme=scheme,
@@ -278,6 +291,7 @@ def classification(
     
     resnet_dir = os.path.join(resnet_dir, scheme)
     classification_dir = os.path.join(classification_dir, scheme)
+    
     ckpt_dir = os.path.join(ckpt_dir, scheme)
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -379,6 +393,7 @@ def classification(
 
     test_dataset = ClassificationDataset(
         dataset=dataset,
+        timestamp=timestamp,
         subdata=subdata,
         mode='test',
         scheme=scheme,
@@ -411,7 +426,7 @@ def classification(
     anomaly_scores = np.array(anomaly_scores)
 
     precision, recall, thresholds = precision_recall_curve(
-        y_true=test_dataset.labels,
+        y_true=test_dataset.test_labels,
         y_score=anomaly_scores,
     )
 
@@ -440,7 +455,7 @@ def classification(
     
     best_f1_score, best_tp, best_fp, best_fn = f1_stat(
         prediction=best_anomaly_prediction,
-        gt=test_dataset.labels
+        gt=test_dataset.test_labels
     )
 
     return best_f1_score, best_tp, best_fp, best_fn, auc_pr

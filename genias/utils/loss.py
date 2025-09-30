@@ -288,17 +288,6 @@ class pretextloss():
 class classificationloss():
     """
     Classification loss for CARLA's self-supervised classification stage.
-
-    Optimizing this loss is to maximize the similarity between logits of window
-    and nearest neighbor, and minimize the similarity between logits of window
-    and furthest neighbor. By doing so, the model can classify the normal data
-    and anomalous data more clearly.
-
-    Parameters:
-        window_logit:   The logit of window. This can be both anchor and
-                        negative pair.
-        nearest_logit:  The logit of nearest neighbor.
-        furthest_logit: The logit of furthest neighbor.
     """
     def __init__(self) -> None:
         self.bceloss = nn.BCELoss()
@@ -309,6 +298,18 @@ class classificationloss():
         nearest_logit: Tensor,
         furthest_logit: Tensor,
     ) -> Tuple[Tensor, float, float]:
+        """
+        Optimizing this loss is to maximize the similarity between logits of 
+        window and nearest neighbor, and minimize the similarity between logits
+        of window and furthest neighbor. By doing so, the model can classify 
+        the normal data and anomalous data more clearly.
+
+        Parameters:
+            window_logit:   The logit of window. This can be both anchor and
+                            negative pair.
+            nearest_logit:  The logit of nearest neighbor.
+            furthest_logit: The logit of furthest neighbor.
+        """
         B, N = window_logit.shape
         positive_similarity = torch.bmm(
             window_logit.view(B, 1, N),
