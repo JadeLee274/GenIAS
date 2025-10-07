@@ -149,10 +149,7 @@ class PretextDataset(object):
         return
     
     def _get_negative_pairs(self) -> None:
-        anomaly_injection = AnomalyInjection(
-            scheme=self.scheme,
-            inject_different_anomalies=self.inject_different_anomalies,
-        )
+        anomaly_injection = AnomalyInjection(scheme=self.scheme)
 
         if self.scheme not in ['carla', 'carla_modified']:
             vae = VAE(

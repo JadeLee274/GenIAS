@@ -312,13 +312,10 @@ class AnomalyInjection(object):
     def __init__(
         self,
         scheme: str = 'carla',
-        inject_different_anomalies: bool = False
     ) -> None:
         assert scheme in ['carla', 'carla_modified'], \
         "'carla', 'carla_modified'"
         self.scheme = scheme
-        self.inject_different_anomalies = inject_different_anomalies
-
         return
     
     def inject_anomaly(
@@ -332,134 +329,95 @@ class AnomalyInjection(object):
         trend_factor: Optional[float] = None,
         shapelet_factor: bool = False,
     ) -> Matrix:
-        """
-        Anomaly injection code for CARLA.
-
-        Parameters:
-            window:             The window that the anomaly will be injected.
-
-                                The anomaly-injected-subset of the window will
-                                be called 'subsequence' in this description.
-
-            subsequence_length: The length of the subsequence. Default None.
-                                If not specified, it is determined as one of
-                                the integers between 0.1 * (window length) and
-                                0.9 * (window length).
-
-            compression_factor: The degraded subsequence will be shortened to
-                                1/(this factor) of its length. Default None.
-                                If not specified, it is determined as one of
-                                2, 3, 4.
-
-            start_idx:          The anomaly injection starts from this index.
-                                That is, the subsequence will be started from
-                                this index. Default None. If not specified, it
-                                is determined as one of the integers between
-                                0 and (window length - subsequence length).
-
-            trend_end:          Determines if that the subsequence lasts to
-                                the last index of the window. Default False.
-
-            scale_factor:       The subsequence will be scaled by this value.
-                                Default None. If not specified, it is 
-                                determined as one of the floats between 0.1 and 
-                                2.0.
-
-            trend_factor:       If the type of anomalies that will be added is
-                                'trend', then it determines the scale of trend
-                                anomaly. Default None. If not stated, it is
-                                determined as the value of normal distribution
-                                with mean 1 and standard deviation 0.5.
-
-            shapelet_factor:    Whether or not to add shapelet anomaly.
-                                Default False.
-        """
+        # Make copy of the input window
         _window = window.copy()
 
+        # Set start/end index of anomaly injection subset
         if subsequence_length is None:
             min_len = int(_window.shape[0] * 0.1)
             max_len = int(_window.shape[0] * 0.9)
             subsequence_length = np.random.randint(min_len, max_len)
-
-        if compression_factor is None:
-            compression_factor = np.random.randint(2, 5)
-
-        if scale_factor is None:
-            scale_factor = np.random.uniform(0.1, 2.0, _window.shape[1])
         
         if start_idx is None:
             start_idx = np.random.randint(0, len(_window) - subsequence_length)
         
         end_idx = min(start_idx + subsequence_length, _window.shape[0])
 
-        if (self.scheme == 'carla' and trend_end):
+        if trend_end:
             end_idx = _window.shape[0]
-
-        degraded_subsequence = _window[start_idx: end_idx]
-        degraded_subsequence = np.tile(
-            A=degraded_subsequence,
-            reps=(compression_factor, 1)
-        )
-        degraded_subsequence = degraded_subsequence[::compression_factor]
         
+        # Make temporary anomlay injection subset
+        degraded_subsequence = _window[start_idx: end_idx]
+        
+        # Global anomaly and Contextual anomaly
         if self.scheme == 'carla':
             degraded_subsequence = degraded_subsequence * scale_factor
 
         elif self.scheme == 'carla_modified':
             if _window.std() == 0:
-                _scale_factor = np.random.choice([-3, -2, -1, 1, 2, 3])
-                degraded_subsequence = degraded_subsequence + _scale_factor
+                degraded_subsequence = degraded_subsequence + scale_factor
             else:
-                _scale_factor = scale_factor        
-                degraded_subsequence = degraded_subsequence * _scale_factor
+                degraded_subsequence = degraded_subsequence * scale_factor
 
+        # Trend anomaly
         if trend_factor is None:
             trend_factor = np.random.normal(1, 0.5)
 
-        trend_coef = 1
+        if self.scheme == 'carla':
+            trend_coef = 1
+        elif self.scheme == 'carla_modified':
+            trend_coef = np.random.choice([0.5, 0.75, 1.0, 1.25, 1.5])
+
         random_float = np.random.uniform()
 
         if random_float < 0.5:
-            trend_coef = -1
+            trend_coef = -trend_coef
         
-        if self.scheme == 'carla':
-            degraded_subsequence = degraded_subsequence \
-                                   + trend_coef * trend_factor
+        degraded_subsequence = degraded_subsequence + trend_coef * trend_factor
 
-        elif self.scheme == 'carla_modified':
-            trend_anomaly_vector = np.random.randn(end_idx - start_idx, 1)
-            degraded_subsequence = degraded_subsequence + \
-            + trend_anomaly_vector * trend_coef * trend_factor
+        # Seasonal anomaly
+        if compression_factor is None:
+            compression_factor = np.random.randint(2, 5)
 
+            degraded_subsequence = np.tile(
+                A=degraded_subsequence,
+                reps=(compression_factor, 1)
+            )
+            degraded_subsequence = degraded_subsequence[::compression_factor]
+
+            if self.scheme == 'carla_modified' \
+            and degraded_subsequence.std() == 0:
+                
+                degraded_subsequence = degraded_subsequence \
+                + np.random.randn(*degraded_subsequence.shape)
+        
+        # Shapelet anomaly
         if shapelet_factor:
-            degraded_subsequence = _window[start_idx] \
-            + (np.random.random_sample(_window[start_idx].shape) * 0.1)
+            if self.scheme == 'carla':
+                degraded_subsequence = _window[start_idx] \
+                + (np.random.random_sample(_window[start_idx].shape) * 0.1)
+            elif self.scheme =='carla_modified':
+                degraded_subsequence = _window[start_idx] \
+                + np.random.randn(*degraded_subsequence.shape) * 0.1
 
+        # Convert the subset of copied window into anomaly-injected-subset
         _window[start_idx: end_idx] = degraded_subsequence
 
         return np.squeeze(_window)
     
     def __call__(self, x: Matrix) -> Matrix:
         window = x.copy()
-
-        degraded_window = window.copy()
+        window_global = window.copy()
+        window_contextual = window.copy()
+        window_seasonal = window.copy()
+        window_shapelet = window.copy()
+        window_trend = window.copy()
 
         min_len = int(window.shape[0] * 0.1)
         max_len = int(window.shape[0] * 0.9)
 
         subsequence_length = np.random.randint(min_len, max_len)
         start_idx = np.random.randint(0, len(window) - subsequence_length)
-        
-        anomaly_types = [
-            'global',
-            'contextual',
-            'seasonal',
-            'shapelet',
-            'trend'
-        ]
-
-        if not self.inject_different_anomalies:
-            anomaly_type = random.choice(anomaly_types)
 
         if window.ndim > 1:
             num_features = window.shape[1]
@@ -468,62 +426,9 @@ class AnomalyInjection(object):
             for _ in range(num_dims):
                 i = np.random.randint(0, num_features)
             
-                if self.inject_different_anomalies:
-                    anomaly_type = random.choice(anomaly_types)
-            
                 temp_window = window[:, i].reshape(window.shape[0], 1)
 
-                if anomaly_type == 'global':
-                    degraded_window[:, i] = self.inject_anomaly(
-                        window=temp_window,
-                        subsequence_length=2,
-                        compression_factor=1,
-                        start_idx=start_idx,
-                        scale_factor=8,
-                        trend_factor=0,
-                    )
-                elif anomaly_type == 'contextual':
-                    degraded_window[:, i] = self.inject_anomaly(
-                        window=temp_window,
-                        subsequence_length=4,
-                        compression_factor=1,
-                        start_idx=start_idx,
-                        scale_factor=3,
-                        trend_factor=0,
-                    )
-                elif anomaly_type == 'seasonal':
-                    degraded_window[:, i] = self.inject_anomaly(
-                        window=temp_window,
-                        subsequence_length=subsequence_length,
-                        start_idx=start_idx,
-                        scale_factor=1,
-                        trend_factor=0,
-                    )
-                elif anomaly_type == 'shapelet':
-                    degraded_window[:, i] = self.inject_anomaly(
-                        window=temp_window,
-                        subsequence_length=subsequence_length,
-                        compression_factor=1,
-                        start_idx=start_idx,
-                        scale_factor=1,
-                        trend_factor=0,
-                        shapelet_factor=True,
-                    )
-                elif anomaly_type == 'trend':
-                    degraded_window[:, i] = self.inject_anomaly(
-                        window=temp_window,
-                        subsequence_length=subsequence_length,
-                        compression_factor=1,
-                        start_idx=start_idx,
-                        trend_end=True,
-                        scale_factor=1,
-                    )
-                
-        else:
-            temp_window = window.reshape(len(window), 1)
-
-            if anomaly_type == 'global':
-                degraded_window = self.inject_anomaly(
+                window_global[:, i] = self.inject_anomaly(
                     window=temp_window,
                     subsequence_length=2,
                     compression_factor=1,
@@ -531,25 +436,22 @@ class AnomalyInjection(object):
                     scale_factor=8,
                     trend_factor=0,
                 )
-            elif anomaly_type == 'contextual':
-                degraded_window = self.inject_anomaly(
+                window_contextual[:, i] = self.inject_anomaly(
                     window=temp_window,
                     subsequence_length=4,
                     compression_factor=1,
                     start_idx=start_idx,
                     scale_factor=3,
                     trend_factor=0,
-                    )
-            elif anomaly_type == 'seasonal':
-                degraded_window = self.inject_anomaly(
+                )
+                window_seasonal[:, i] = self.inject_anomaly(
                     window=temp_window,
                     subsequence_length=subsequence_length,
                     start_idx=start_idx,
                     scale_factor=1,
                     trend_factor=0,
                 )
-            elif anomaly_type == 'shapelet':
-                degraded_window = self.inject_anomaly(
+                window_shapelet[:, i] = self.inject_anomaly(
                     window=temp_window,
                     subsequence_length=subsequence_length,
                     compression_factor=1,
@@ -558,14 +460,67 @@ class AnomalyInjection(object):
                     trend_factor=0,
                     shapelet_factor=True,
                 )
-            elif anomaly_type == 'trend':
-                degraded_window = self.inject_anomaly(
+                window_trend[:, i] = self.inject_anomaly(
                     window=temp_window,
                     subsequence_length=subsequence_length,
                     compression_factor=1,
                     start_idx=start_idx,
                     trend_end=True,
                     scale_factor=1,
-                    )
+                )
+                
+        else:
+            temp_window = window.reshape(len(window), 1)
+
+            window_global = self.inject_anomaly(
+                window=temp_window,
+                subsequence_length=2,
+                compression_factor=1,
+                start_idx=start_idx,
+                scale_factor=8,
+                trend_factor=0,
+            )
+            window_contextual = self.inject_anomaly(
+                window=temp_window,
+                subsequence_length=4,
+                compression_factor=1,
+                start_idx=start_idx,
+                scale_factor=3,
+                trend_factor=0,
+                )
+            window_seasonal = self.inject_anomaly(
+                window=temp_window,
+                subsequence_length=subsequence_length,
+                start_idx=start_idx,
+                scale_factor=1,
+                trend_factor=0,
+            )
+            window_shapelet = self.inject_anomaly(
+                window=temp_window,
+                subsequence_length=subsequence_length,
+                compression_factor=1,
+                start_idx=start_idx,
+                scale_factor=1,
+                trend_factor=0,
+                shapelet_factor=True,
+            )
+            window_trend = self.inject_anomaly(
+                window=temp_window,
+                subsequence_length=subsequence_length,
+                compression_factor=1,
+                start_idx=start_idx,
+                trend_end=True,
+                scale_factor=1,
+                )
+        
+        degraded_windows = [
+            window_global,
+            window_contextual,
+            window_seasonal,
+            window_shapelet,
+            window_trend,
+        ]
+
+        degraded_window = random.choice(degraded_windows)
 
         return degraded_window

@@ -306,8 +306,8 @@ if __name__ == '__main__':
     config = args.parse_args()
     main(
         exp_name=config.exp_name,
-        task=config.task,
         dataset=config.dataset,
+        task=config.task,
         start_subdata=config.start_subdata,
         pretext_timestamp=config.pretext_timestamp,
         pretext_scheme=config.pretext_scheme,
