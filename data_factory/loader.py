@@ -158,7 +158,6 @@ class PretextDataset(object):
                 latent_dim=100,
                 depth=10,
             ).to(self.device)
-            
             vae_ckpt = torch.load(
                 os.path.join(vae_dir, 'epoch_1000.pt'),
                 map_location=self.device
@@ -185,7 +184,6 @@ class PretextDataset(object):
                     tau=patch_coef,
                 )
                 negative_pairs.append(negative_pair)
-            
         self.negative_pairs = np.array(negative_pairs)
         np.save(
             file=os.path.join(negative_dir, 'negative_pairs.npy'),
@@ -233,10 +231,16 @@ class ClassificationDataset(object):
                 data = np.load(
                     os.path.join(data_dir, 'train', f'{subdata}.npy')
                 )
+                self.mean, self.std = get_mean_std(x=data)
+                self.std = np.where(self.std == 0.0, 1.0, self.std)
             elif mode == 'test':
                 data = np.load(
                     os.path.join(data_dir, 'test', f'{subdata}.npy')
                 )
+                self.mean, self.std = get_mean_std(x=np.load(
+                    os.path.join(data_dir, 'train', f'{subdata}.npy')
+                ))
+                self.std = np.where(self.std == 0.0, 1.0, self.std)
                 labels = np.load(
                     os.path.join(data_dir, 'label', f'{subdata}.npy')    
                 )
@@ -246,7 +250,14 @@ class ClassificationDataset(object):
                 data = pd.read_csv(os.path.join(data_dir, 'SWaT_Normal.csv'))
                 data.drop(columns=[' Timestamp', 'Normal/Attack'],inplace=True)
                 data = data.values[:, 1:]
+                self.mean, self.std = get_mean_std(x=data)
+                self.std = np.where(self.std == 0.0, 1.0, self.std)
             elif mode == 'test':
+                data = pd.read_csv(os.path.join(data_dir, 'SWaT_Normal.csv'))
+                data.drop(columns=[' Timestamp', 'Normal/Attack'],inplace=True)
+                data = data.values[:, 1:]
+                self.mean, self.std = get_mean_std(x=data)
+                self.std = np.where(self.std == 0.0, 1.0, self.std)
                 data = pd.read_csv(os.path.join(data_dir, 'SWaT_Abormal.csv'))
                 data.drop(columns=[' Timestamp'], inplace=True)
                 data = data.values
@@ -255,9 +266,6 @@ class ClassificationDataset(object):
                 labels = np.where(labels == 'Normal', 0, 1)
 
         self.data_dim = data.shape[-1]
-        self.mean, self.std = get_mean_std(x=data)
-        self.std = np.where(self.std == 0.0, 1.0, self.std)
-
         classification_dir = os.path.join('classification_dataset', dataset)
 
         if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
@@ -333,7 +341,6 @@ class ClassificationDataset(object):
             self.fns = np.concatenate([anchor_fns, negative_fns], axis=0)
 
         elif mode == 'test':
-            data = (data - self.mean) / self.std
             self.windows = convert_to_windows(
                 data=data,
                 window_size=window_size,
@@ -369,6 +376,160 @@ class ClassificationDataset(object):
             furthest_neighbor = (furthest_neighbor - self.mean) / self.std
 
             return window, nearest_neighbor, furthest_neighbor
-        
+
         else:
-            return self.windows[idx]
+            return (self.windows[idx] - self.mean) / self.std
+
+
+############################## Dataset for DeepSVDD ############################
+
+
+class DeepSVDDDataset(object):
+    """
+    Dataset for Classification stage of CARLA.
+
+    Parameters:
+        dataset:     Name of the dataset.
+        subdata:     If the dataset consists of more than one subdata, the
+                     name of subdata.
+        window_size: Window size of anchor. Default 200.
+        mode:        If 'train', anchors, negative pairs, nearest/furthest
+                     neighborhoods are loaded for training. If 'test', only
+                     the raw test dataset (with window conversion not applied) 
+                     and the test label are loaded.
+        scheme:      Which scheme to use the test data. It should be chosen 
+                     either ['true', 'carla', 'genias'].
+    """
+    def __init__(
+        self,
+        dataset: str,
+        subdata: str,
+        window_size: int = 200,
+        mode: str = 'train',
+        scheme: str = 'carla',
+        device: str = 'cuda:0'
+    ) -> None:
+        self.dataset = dataset
+        self.subdata = subdata
+        assert mode in ['train', 'test'], "mode is either 'train' or 'test'"
+        self.mode = mode
+        
+        data_dir = os.path.join('data', dataset)
+        if dataset in ['MSL', 'SMAP', 'SMD']:
+            if mode == 'train':
+                data = np.load(
+                    os.path.join(data_dir, 'train', f'{subdata}.npy')
+                )
+                self.mean, self.std = get_mean_std(x=data)
+                self.std = np.where(self.std == 0.0, 1.0, self.std)
+            elif mode == 'test':
+                data = np.load(
+                    os.path.join(data_dir, 'test', f'{subdata}.npy')
+                )
+                self.mean, self.std = get_mean_std(x=np.load(
+                    os.path.join(data_dir, 'train', f'{subdata}.npy')
+                ))
+                self.std = np.where(self.std == 0.0, 1.0, self.std)
+                labels = np.load(
+                    os.path.join(data_dir, 'label', f'{subdata}.npy')    
+                )
+
+        elif dataset == 'SWaT':
+            if mode == 'train':
+                data = pd.read_csv(os.path.join(data_dir, 'SWaT_Normal.csv'))
+                data.drop(columns=[' Timestamp', 'Normal/Attack'],inplace=True)
+                data = data.values[:, 1:]
+                self.mean, self.std = get_mean_std(x=data)
+                self.std = np.where(self.std == 0.0, 1.0, self.std)
+            elif mode == 'test':
+                data = pd.read_csv(os.path.join(data_dir, 'SWaT_Normal.csv'))
+                data.drop(columns=[' Timestamp', 'Normal/Attack'],inplace=True)
+                data = data.values[:, 1:]
+                self.mean, self.std = get_mean_std(x=data)
+                self.std = np.where(self.std == 0.0, 1.0, self.std)
+                data = pd.read_csv(os.path.join(data_dir, 'SWaT_Abormal.csv'))
+                data.drop(columns=[' Timestamp'], inplace=True)
+                data = data.values
+                labels = data[:, -1]
+                data = data[:, :-1]
+                labels = np.where(labels == 'Normal', 0, 1)
+
+        data_dim = data.shape[-1]
+        self.windows = convert_to_windows(data=data, window_size=window_size)
+
+        if mode == 'test': 
+            labels = convert_to_windows(data=labels, window_size=window_size)
+            window_labels = []
+            
+            for label in labels:
+                if np.sum(label) > 0:
+                    window_labels.append(1)
+                else:
+                    window_labels.append(0)
+            
+            self.labels = np.array(window_labels).reshape(-1)
+            is_anomaly = np.where(self.labels > 0.9)[0]
+            
+            if scheme == 'carla':
+                anomaly_injection = AnomalyInjection()
+                for idx in is_anomaly:
+                    window = self.windows[idx]
+                    window = anomaly_injection(window)
+                    self.windows[idx] = window
+                
+            elif scheme == 'genias':
+                vae = VAE(
+                    window_size=window_size,
+                    data_dim=data_dim,
+                    latent_dim=100,
+                    depth=10,
+                ).to(device)
+                
+                vae_dir = os.path.join('checkpoints', 'vae', self.dataset)
+                
+                if self.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
+                    vae_dir = os.path.join(vae_dir,  self.subdata)
+                vae_ckpt = torch.load(
+                    os.path.join(vae_dir, 'epoch_1000.pt'),
+                    map_location=device
+                    )
+                vae.load_state_dict(vae_ckpt['model'])
+                vae.eval()
+
+                if self.dataset == 'MSL':
+                    patch_coef = 0.4
+                elif self.dataset in ['SMAP', 'Yahoo']:
+                    patch_coef = 0.2
+                else:
+                    patch_coef = np.random.choice([0.05, 0.1, 0.2, 0.4, 0.6])
+
+                for idx in is_anomaly:
+                    window = torch.from_numpy(self.windows[idx]).float().to(device)
+                    window_anomaly = vae.forward(window.unsqueeze(0))[-1]
+                    window_anomaly = window.detach().cpu().squeeze(0).numpy()
+                    window = patch(
+                        x=window.detach().cpu().numpy(),
+                        x_tilde=window_anomaly,
+                        tau=patch_coef,
+                    )
+                    self.windows[idx] = window
+        
+        return
+
+    def __len__(self) -> int:
+        return self.windows.shape[0]
+    
+    def __getitem__(
+        self,
+        idx: int
+        ) -> Union[Matrix, Tuple[Matrix, Array]]:
+        if self.mode == 'train':
+            window = self.windows[idx]
+            window = (window - self.mean) / self.std
+            return window
+        elif self.mode == 'test':
+            window = self.windows[idx]
+            window = (window - self.mean) / self.std
+            return window, self.labels[idx]
+        else:
+            NotImplementedError

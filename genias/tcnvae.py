@@ -25,7 +25,7 @@ class Encoder(nn.Module):
         super().__init__()
         self.encoder = TemporalConvNet(
             in_channels=window_size,
-            hidden_channels=[window_size] * depth,
+            hidden_channels=[window_size // 2, window_size // 4, window_size // 8, 5],
             dropout=dropout,
         )
         self.fc_mu = nn.Linear(
@@ -79,7 +79,7 @@ class Decoder(nn.Module):
         super().__init__()
         self.latent_dim = latent_dim
         activation = nn.ReLU()
-        hidden_list = [window_size] * depth
+        hidden_list = [5, window_size // 8, window_size // 4, window_size // 2]
         dec_layer = [
             nn.Linear(
                 in_features=latent_dim,
@@ -88,7 +88,7 @@ class Decoder(nn.Module):
             activation,
         ]
 
-        for i in range(depth - 1):
+        for i in range(len(hidden_list) - 1):
             dec_layer.append(
                 nn.ConvTranspose1d(
                     in_channels=hidden_list[i],
@@ -103,7 +103,7 @@ class Decoder(nn.Module):
         
         dec_layer.append(
             nn.ConvTranspose1d(
-                in_channels=hidden_list[depth - 1],
+                in_channels=hidden_list[-1],
                 out_channels=window_size,
                 kernel_size=3,
                 stride=1,
@@ -174,7 +174,7 @@ class VAE(nn.Module):
             dropout=0.1,
         )
         self.psi = nn.Parameter(
-            data=torch.ones(1, latent_dim),
+            data=2.0 * torch.ones(5, latent_dim),
             requires_grad=True,
         )
     

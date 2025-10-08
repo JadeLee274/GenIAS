@@ -1,7 +1,8 @@
 python carla_main.py \
-    --exp-name debug \
-    --task classification \
-    --use-wandb False \
+    --exp-name genias \
     --dataset MSL \
+    --scheme genias \
+    --use-wandb False \
     --gpu-num 0 \
-    --classification-model-dir logs/pretext_debug_250912_193111 \
+    --seed 42 \
+    --multiprocess True

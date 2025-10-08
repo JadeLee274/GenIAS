@@ -11,3 +11,15 @@ import torch.nn.functional as F
 Vector = np.ndarray
 Matrix = np.ndarray
 Array = np.ndarray
+
+def str2bool(v: str) -> bool:
+    """
+    Converts string (Either True or False) to bool.
+
+    Parameters:
+        v: String instance. Either 'True' or 'False.'
+
+    Returns:
+        Boolean instance. Either True or False.
+    """
+    return v.lower() in ('true')

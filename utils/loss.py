@@ -160,14 +160,17 @@ def vae_loss(
         They are only for recording loss during training.
     """
     recon = recon_loss(x, x_hat)
+    dist_anom = recon_loss(x, x_tilde)
+    dist_hat_tilde = recon_loss(x_hat, x_tilde)
     pert = pert_loss(x, x_hat, x_tilde)
     zero_pert = zero_pert_loss(x, x_tilde)
     kld = kld_loss(mu, logvar, prior_var)
     total = recon_weight * recon + pert_weight * pert \
             + zero_pert_weight * zero_pert + kld_weight * kld
     
-    return recon.detach().item(), pert.detach().item(), \
-           zero_pert.detach().item(), kld.detach().item(), total
+    return recon.detach().item(), dist_anom.detach().item(), \
+        dist_hat_tilde.detach().item(), pert.detach().item(), \
+        zero_pert.detach().item(), kld.detach().item(), total
 
 
 def svdd_loss(

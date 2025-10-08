@@ -17,20 +17,6 @@ from data_factory.loader import GenIASDataset
 from genias.tcnvae import VAE
 from utils.loss import vae_loss
 
-
-def str2bool(v: str) -> bool:
-    """
-    Converts string (Either True or False) to bool.
-
-    Parameters:
-        v: String instance. Either 'True' or 'False.'
-
-    Returns:
-        Boolean instance. Either True or False.
-    """
-    return v.lower() in ('true')
-
-
 def train_vae(
     dataset: str,
     subdata: str,
@@ -80,6 +66,8 @@ def train_vae(
 
     for epoch in range(epochs):
         recon_loss = 0.0
+        dist_anom_loss = 0.0
+        dist_hat_tilde_loss = 0.0
         pert_loss = 0.0
         zero_pert_loss = 0.0
         kld_loss = 0.0
@@ -89,15 +77,18 @@ def train_vae(
             data = data.to(device).float()
             optimizer.zero_grad()
             mu, logvar, x_hat, x_tilde = model(data)
-            recon, pert, zero_pert, kld, total_loss = vae_loss(
+            recon, dist_anom, dist_hat_tilde, pert, zero_pert, kld, total_loss = vae_loss(
                 x=data,
                 x_hat=x_hat,
                 x_tilde=x_tilde,
                 mu=mu,
-                logvar=logvar
+                logvar=logvar,
+                zero_pert_weight=0.1
             )
             total_loss.backward()
             recon_loss += recon
+            dist_anom_loss += dist_anom
+            dist_hat_tilde_loss += dist_hat_tilde
             pert_loss += pert
             zero_pert_loss += zero_pert
             kld_loss += kld
@@ -107,13 +98,18 @@ def train_vae(
         scheduler.step()
 
         recon_loss /= len(train_loader)
+        dist_anom_loss /= len(train_loader)
+        dist_hat_tilde_loss /= len(train_loader)
         pert_loss /= len(train_loader)
         zero_pert_loss /= len(train_loader)
         kld_loss /= len(train_loader)
         train_loss /= len(train_loader)
 
-        logging.info(f'Epoch {epoch+1} loss:')
+        logging.info(f'{subdata} Epoch {epoch+1} loss:')
+        logging.info(f'- Psi mean {model.psi.mean():.4f}')
         logging.info(f'- Reconstruction loss: {recon_loss:.4f}')
+        logging.info(f'- Distance b/w anchor and anomal {dist_anom_loss:.4f} ')
+        logging.info(f'- Distance b/w normal and anomal {dist_hat_tilde_loss:.4f} ')
         logging.info(f'- Perturbation loss: {pert_loss:.4f}')
         logging.info(f'- Zero perturbation loss: {zero_pert_loss:.4f}')
         logging.info(f'- KL-Divergence loss: {kld_loss:.4f}')
@@ -158,27 +154,38 @@ if __name__ == '__main__':
         default=0,
         help='What GPU will be used for training. Default 0.'
     )
+    args.add_argument(
+        '--multiprocess',
+        type=bool,
+        default=False,
+        help='If true, then simutaneously train multiple subdata. Default False.'
+    )
     config = args.parse_args()
 
+    set_logging_filehandler(
+        log_file_path=os.path.join('log/vae', config.dataset)
+    )
     if config.dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
         data_dir = os.path.join('data', config.dataset, 'train')
         train_list = sorted(os.listdir(data_dir))
         train_list = [f.replace('.npy', '') for f in train_list]
 
-        for subdata in train_list:
-            set_logging_filehandler(
-                log_file_path=os.path.join('log/vae', f'{config.dataset}.log')
-            )
-            train_vae(
-                dataset=config.dataset,
-                subdata=subdata,
-                gpu_num=config.gpu_num
-            )
+        if config.multiprocess:
+            from multiprocessing import Pool
+            from functools import partial
+            trainer = partial(train_vae, config.dataset, gpu_num=config.gpu_num)
+            with Pool(processes=10) as pool:
+                pool.map(trainer, train_list)
+        
+        else:
+            for subdata in train_list:
+                train_vae(
+                    dataset=config.dataset,
+                    subdata=subdata,
+                    gpu_num=config.gpu_num
+                )
     
     else:
-        set_logging_filehandler(
-            log_file_path=os.path.join('log/vae', f'{config.dataset}.log')
-        )
         train_vae(
             dataset=config.dataset,
             gpu_num=config.gpu_num

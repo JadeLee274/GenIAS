@@ -26,6 +26,7 @@ class SVDD(nn.Module):
         representation_dim: int = 128,
     ) -> None:
         super().__init__()
+        self.representation_dim = representation_dim
         network = []
         hidden_dims = [
             int(data_dim + i * (representation_dim - data_dim) / (depth)) \

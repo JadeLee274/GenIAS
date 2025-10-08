@@ -12,19 +12,6 @@ from utils.metric import *
 from utils.fix_seed import fix_seed_all
 from utils.set_logging import set_logging_filehandler
 
-
-def str2bool(v: str) -> bool:
-    """
-    Changes string to bool.
-
-    Parameters:
-        v: String. Must be either 'True' or 'False'.
-    """
-    assert v in ['True', 'False'], "string must be either 'True' or 'False'"
-
-    return v.lower() in 'true'
-
-
 def cosine_schedule(
     optimizer: optim.Adam,
     current_epoch: int,
@@ -103,8 +90,9 @@ def pretext(
     used for the self-supervised stage of CARLA.
     """
 
-    print(f'Pretext training on {dataset} {subdata} start...\n')
+    logging.info(f'Pretext training on {dataset} {subdata} start...\n')
 
+    device = torch.device(f'cuda:{gpu_num}')
     train_dataset = PretextDataset(
         dataset=dataset,
         subdata=subdata,
@@ -114,7 +102,6 @@ def pretext(
     data_dim = train_dataset.data_dim
     model = PretextModel(in_channels=data_dim, mid_channels=4)
 
-    device = torch.device(f'cuda:{gpu_num}')
     model = model.to(device)
     criterion = pretextloss()
 
@@ -166,7 +153,7 @@ def pretext(
             epoch_loss += prev_loss
         
         epoch_loss /= len(train_loader)
-        print(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
+        logging.info(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
 
         if epoch == 0 or (epoch + 1) % model_save_interval == 0:
             torch.save(
@@ -178,9 +165,9 @@ def pretext(
                 f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
             )
 
-    print(f'Pretext training on {dataset} {subdata} finished.')
+    logging.info(f'Pretext training on {dataset} {subdata} finished.')
 
-    print(f'Start saving top-{num_neighbors} neighbors...')
+    logging.info(f'Start saving top-{num_neighbors} neighbors...')
     model.eval()
 
     timeseries_loader = DataLoader(
@@ -270,7 +257,9 @@ def pretext(
         arr=furthest_indices_list,
     )
 
-    print('\nPretext stage done. Moving on to classification stage.\n')
+    logging.info(
+        f'\n{dataset} {subdata} pretext stage done. ' \
+        'Moving on to classification stage.\n')
 
     return
 
@@ -319,7 +308,7 @@ def classification(
     )
     criterion = classificationloss()
 
-    ckpt_dir = os.path.join('checkpoints' 'classification', dataset)
+    ckpt_dir = os.path.join('checkpoints', 'classification', dataset)
 
     if dataset in ['MSL', 'SMAP', 'SMD', 'Yahoo-A1', 'KPI']:
         ckpt_dir = os.path.join(ckpt_dir, subdata)
@@ -500,11 +489,20 @@ def classification(
         gt=test_dataset.labels,
     )
 
+    logging.info(f'- Best True Positives: {best_tp}')
+    logging.info(f'- Best False Positives: {best_fp}')
+    logging.info(f'- Best False Negatives: {best_fn}\n')
+
     return best_f1_score, best_tp, best_fp, best_fn, auc_pr
 
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
+    args.add_argument(
+        '--exp-name',
+        type=str,
+        help='Experiment name.'
+    )
     args.add_argument(
         '--dataset',
         type=str,
@@ -542,22 +540,24 @@ if __name__ == "__main__":
         help="gpu number. Default 0.",
     )
     args.add_argument(
-        '-seed',
+        '--seed',
         type=int,
         default=42,
         help='Fixed seed. Default 42.',
+    )
+    args.add_argument(
+        '--multiprocess',
+        type=bool,
+        default=False,
     )
     config = args.parse_args()
 
     fix_seed_all(config.seed)
 
-    log_dir = os.path.join('log/carla', config.dataset)
+    log_dir = os.path.join('log/carla', config.dataset, config.scheme)
     os.makedirs(log_dir, exist_ok=True)
 
-    if config.use_genias:
-        log_file_path = os.path.join(log_dir, 'use_genias_results.log')
-    else:
-        log_file_path = os.path.join(log_dir, 'without_genias_results.log')
+    log_file_path = os.path.join(log_dir, config.exp_name)
     
     set_logging_filehandler(log_file_path=log_file_path)
     logging.info(f'Train and inference log of {config.dataset}')
@@ -572,30 +572,42 @@ if __name__ == "__main__":
         data_dir = os.path.join('data', config.dataset, 'train')
         data_list = sorted(os.listdir(data_dir))
         data_list = [data.replace('.npy', '') for data in data_list]
-
-        for subdata in data_list:
-            pretext(
-                dataset=config.dataset,
-                subdata=subdata,
-                scheme=config.scheme,
-                gpu_num=config.gpu_num,
+        if config.multiprocess:
+            from multiprocessing import Pool
+            from functools import partial
+            pretext_trainer = partial(
+                pretext, config.dataset,
+                scheme=config.scheme, gpu_num=config.gpu_num,
             )
-            best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
-                dataset=config.dataset,
-                subdata=subdata,
-                scheme=config.scheme,
-                neighborhood_choice=config.neighborhood_choice,
-                gpu_num=config.gpu_num,
-            )
-            best_f1_list.append(best_f1_score)
-            best_tp_list.append(best_tp)
-            best_fp_list.append(best_fp)
-            best_fn_list.append(best_fn)
-            auc_pr_list.append(auc_pr)
-
-            logging.info(f'- True Positives: {best_tp}')
-            logging.info(f'- False Positives: {best_fp}')
-            logging.info(f'- False Negatives: {best_fn}\n')
+            classification_trainer = partial(
+                classification, config.dataset, 
+                scheme=config.scheme, gpu_num=config.gpu_num
+                )
+            with Pool(processes=10) as pool:
+                pool.map(pretext_trainer, data_list)
+                results = pool.map(classification_trainer, data_list)
+            best_f1_list, best_tp_list, best_fp_list, best_fn_list, auc_pr_list = \
+                zip(*results)
+        else:
+            for subdata in data_list:
+                pretext(
+                    dataset=config.dataset,
+                    subdata=subdata,
+                    scheme=config.scheme,
+                    gpu_num=config.gpu_num,
+                )
+                best_f1_score, best_tp, best_fp, best_fn, auc_pr = classification(
+                    dataset=config.dataset,
+                    subdata=subdata,
+                    scheme=config.scheme,
+                    neighborhood_choice=config.neighborhood_choice,
+                    gpu_num=config.gpu_num,
+                )
+                best_f1_list.append(best_f1_score)
+                best_tp_list.append(best_tp)
+                best_fp_list.append(best_fp)
+                best_fn_list.append(best_fn)
+                auc_pr_list.append(auc_pr)
 
     else:
         data_dir = os.path.join('data', config.dataset)
