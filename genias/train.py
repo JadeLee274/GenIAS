@@ -463,7 +463,8 @@ def classification(
 
 def vae_train(
     dataset: str,
-    subdata: str,
+    timestamp: str,
+    subdata: Optional[str] = None,
     batch_size: int = 100,
     depth: int = 10,
     window_size: int = 200,
@@ -471,7 +472,11 @@ def vae_train(
     gpu_num: int = 0,
     epochs: int = 1000,
     init_lr: float = 1e-4,
-    checkpoint_step: int = 100,
+    prior_var: float = 0.5,
+    recon_weight: float = 1.0,
+    pert_weight: float = 0.1,
+    zero_pert_weight: float = 0.01,
+    kld_weight: float = 0.1,
 ) -> None:
     train_data = GenIASDataset(
         dataset=dataset,
@@ -523,7 +528,12 @@ def vae_train(
                 x_hat=x_hat,
                 x_tilde=x_tilde,
                 mu=mu,
-                logvar=logvar
+                logvar=logvar,
+                prior_var=prior_var,
+                recon_weight=recon_weight,
+                pert_weight=pert_weight,
+                zero_pert_weight=zero_pert_weight,
+                kld_weight=kld_weight,
             )
             total_loss.backward()
             recon_loss += recon
@@ -548,14 +558,13 @@ def vae_train(
         logging.info(f'- KL-Divergence loss: {kld_loss:.4f}')
         logging.info(f'- Total loss: {train_loss:.4f}\n')
 
-        if epoch == 0 or (epoch + 1) % checkpoint_step == 0:
-            torch.save(
-                obj={
-                    'model': model.state_dict(),
-                    'optim': optimizer.state_dict(),
-                },
-                f=os.path.join(ckpt_dir, f'epoch_{epoch + 1}.pt')
-            )
+    torch.save(
+        obj={
+            'model': model.state_dict(),
+            'optim': optimizer.state_dict(),
+        },
+        f=os.path.join(ckpt_dir, f'{timestamp}.pt')
+    )
             
     logging.info('Training Finished')
 

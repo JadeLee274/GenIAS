@@ -15,6 +15,11 @@ def main(
     mix_step: int = 50,
     cut_negative_pairs: bool = True,
     vae_depth: int = 10,
+    vae_prior_var: float = 0.5,
+    vae_recon_weight: float = 1.0,
+    vae_pert_weight: float = 0.1,
+    vae_zero_pert_weight: float = 0.01,
+    vae_kld_weight: float = 0.1,
     batch_size: int = 50,
     gpu_num: int = 0,
     seed: int = 42,
@@ -170,9 +175,15 @@ def main(
             elif task == 'vae_train':
                 vae_train(
                     dataset=dataset,
+                    timestamp=timestamp,
                     subdata=subdata,
                     depth=vae_depth,
                     gpu_num=gpu_num,
+                    prior_var=vae_prior_var,
+                    recon_weight=vae_recon_weight,
+                    pert_weight=vae_pert_weight,
+                    zero_pert_weight=vae_zero_pert_weight,
+                    kld_weight=vae_kld_weight,
                 )
 
         if task in ['classification', 'pretext_classification']:
@@ -285,6 +296,36 @@ if __name__ == '__main__':
         "Default 10."
     )
     args.add_argument(
+        '--vae-prior-var',
+        type=float,
+        default=0.5,
+        help="The prior variance of latent space of VAE. Default 0.5."
+    )
+    args.add_argument(
+        '--vae-recon-weight',
+        type=float,
+        default=1.0,
+        help="The weight of reconstruction loss of VAE. Default 1.0."
+    )
+    args.add_argument(
+        '--vae-pert-weight',
+        type=float,
+        default=0.1,
+        help="The weight of perturbation loss of VAE. Default 0.1."
+    )
+    args.add_argument(
+        '--vae-zero-pert-weight',
+        type=float,
+        default=0.01,
+        help="The weight of zero perturbation loss of VAE. Default 0.01."
+    )
+    args.add_argument(
+        '--vae-kld-weight',
+        type=float,
+        default=0.1,
+        help="The weight of KL-divergence loss of VAE. Default 0.1."
+    )
+    args.add_argument(
         '--batch-size',
         type=int,
         default=50,
@@ -316,6 +357,11 @@ if __name__ == '__main__':
         mix_step=config.mix_step,
         cut_negative_pairs=config.cut_negative_pairs,
         vae_depth=config.vae_depth,
+        vae_prior_var=config.vae_prior_var,
+        vae_recon_weight=config.vae_recon_weight,
+        vae_pert_weight=config.vae_pert_weight,
+        vae_zero_pert_weight=config.vae_zero_pert_weight,
+        vae_kld_weight=config.vae_kld_weight,
         batch_size=config.batch_size,
         gpu_num=config.gpu_num,
         seed=config.seed,
