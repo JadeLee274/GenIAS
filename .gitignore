@@ -9,6 +9,7 @@ classification.py
 *.ipynb
 *.log
 *.npy
+*.png
 *.pt
 *.pth
 *.xlsx

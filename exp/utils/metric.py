@@ -1,12 +1,8 @@
-import re
 from sklearn.metrics import precision_recall_curve, auc
-from genias.utils.common_import import *
-from genias.utils.utils import *
-from genias.data_factory.loader import ClassificationDataset
+from exp.utils.common_import import *
+from exp.utils.utils import *
+from exp.data_factory.loader import ClassificationDatasaet
 from genias.models.carla import *
-
-
-######################### Metrics for CARLA inference ######################### 
 
 
 def f1score(precision: float, recall: float) -> float:
@@ -123,25 +119,9 @@ def auc_pr_statistics(auc_pr_list: List[float]) -> Tuple[float, float]:
 def inference(
     dataset: str,
     gpu_num: int,
-    carla_scheme: str,
     time: str,
     seed: int = 42,
 ) -> None:
-    """
-    If you only want to infer scores with pre-trained models, by using this 
-    function, you can get informations on F1 scores, AUC-PR.
-
-    Parameters:
-        dataset: Name of dataset.
-        gpu_num: The inference will be done on this GPU.
-        scheme:  What scheme was applied for pretext.
-        time:    The start time of the model train & inference process.
-        seed:    The seed will be fixed. Default 42.
-    """
-    assert carla_scheme in [
-        'carla', 'genias', 'mix', 'genias_multiple'
-    ], "'carla', 'genias', 'mix', 'genias_multiple"
-
     fix_seed_all(seed=seed)
 
     device = torch.device(f'cuda:{gpu_num}')
@@ -153,24 +133,29 @@ def inference(
     auc_pr_list = []
 
     ckpt_path = os.path.join(
-        'genias', 'checkpoints', 'classification', dataset
+        'exp', 'checkpoints', 'classification', dataset
     )
 
     if dataset in ['MSL', 'SMAP', 'SMD', 'KPI', 'Yahoo-A1']:
-        data_list = sorted(os.listdir(f'genias/data/dataset/{dataset}/test'))
+        data_list = sorted(
+            os.listdir(
+                os.path.join('exp', 'data', dataset, 'test')
+            )
+        )
         data_list = [f.replace('.npy', '') for f in data_list]
 
         for subdata in data_list:
-            test_set = ClassificationDataset(
-                dataset=dataset,
+            test_set = ClassificationDatasaet(
+                time=time,
+                data=dataset,
                 subdata=subdata,
+                window_size=10,
                 mode='test',
-                scheme=carla_scheme,
             )
             data_dim = test_set.data_dim
             model = ClassificationModel(in_channels=data_dim)
-            _ckpt_path = os.path.join(ckpt_path, subdata, carla_scheme)
-            ckpt = torch.load(os.path.join(_ckpt_path, f'{time}.pt'))
+            _ckpt_path = os.path.join(ckpt_path, subdata, f'{time}.pt')
+            ckpt = torch.load(_ckpt_path)
             model.load_state_dict(ckpt['model'])
             model = model.to(device)
             model.eval()
@@ -231,14 +216,15 @@ def inference(
             auc_pr_list.append(auc_pr)
     
     else:
-        test_set = ClassificationDataset(
-            dataset=dataset,
+        test_set = ClassificationDatasaet(
+            time=time,
+            data=dataset,
+            window_size=10,
             mode='test',
-            scheme=carla_scheme,
         )
         data_dim = test_set.data_dim
         model = ClassificationModel(in_channels=data_dim)
-        ckpt_path = os.path.join(ckpt_path, subdata, carla_scheme)
+        ckpt_path = os.path.join(ckpt_path, subdata)
         ckpt = torch.load(os.path.join(ckpt_path, f'{time}.pt'))
         model.load_state_dict(ckpt['model'])
         model = model.to(device)
@@ -324,102 +310,3 @@ def inference(
     print(f'- Macro F1: {round(f1_macro, 4)}')
 
     return
-
-
-def check_log(log_file_path: str) -> None:
-    """
-    Calculates scores of merged log file.
-
-    Parameters:
-        log_file_path: The path of merged log file.
-
-    If train and inference stopped for some reason, then you can restart the 
-    process from train/test subdata or epoch where it stopped, and merge the 
-    log files of before- and after- restart. 
-
-    This function helps calculating the final score of the entire process by 
-    reading the merged log file. It prints the best f1, micro f1, precision, 
-    recall, auc-pr mean & std, macro f1.
-
-    Make sure that the final line of merged log file ('Scores' part) is erased.
-    """
-
-    best_f1_list = []
-    tp_list = []
-    fp_list = []
-    fn_list = []
-    auc_list = []
-
-
-    with open(log_file_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            if 'Best F1' in line:
-                best_f1_list.append(
-                    float(re.search(r": \s*([0-9]+(?:\.[0-9]+)?)", line).group(1))
-                )
-            elif 'True Positives' in line:
-                tp_list.append(
-                    int(re.search(r": \s*([0-9]+(?:\.[0-9]+)?)", line).group(1))
-                )
-            elif 'False Positives' in line:
-                fp_list.append(
-                    int(re.search(r": \s*([0-9]+(?:\.[0-9]+)?)", line).group(1))
-                )
-            elif 'False Negatives' in line:
-                fn_list.append(
-                    int(re.search(r": \s*([0-9]+(?:\.[0-9]+)?)", line).group(1))
-                )
-            elif 'AUC-PR' in line:
-                auc_list.append(
-                    float(re.search(r": \s*([0-9]+(?:\.[0-9]+)?)", line).group(1))
-                )
-            elif 'Scores' in line:
-                raise ValueError("Make sure that you omit Score part")
-
-    tp = sum(tp_list)
-    fp = sum(fp_list)
-    fn = sum(fn_list)
-
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
-    micro_f1 = (2 * precision * recall) / (precision + recall)
-    macro_f1 = np.mean(best_f1_list)
-
-    auc_mean = np.mean(auc_list)
-    auc_std = np.std(auc_list)
-
-    print('Scores')
-    print(f'- Best F1: {round(max(best_f1_list), 4)}')
-    print(f'- Micro F1: {round(micro_f1, 4)}')
-    print(f'- Precision: {round(precision, 4)}')
-    print(f'- Recall: {round(recall, 4)}')
-    print(f'- AUC-PR mean: {round(auc_mean, 4)}')
-    print(f'- AUC-std: {round(auc_std, 4)}')
-    print(f'- Macro F1: {round(macro_f1, 4)}')
-
-    return
-
-
-def point_adjustment(pred: Vector, gt: Vector) -> Vector:
-    assert len(pred) == len(gt), \
-    f"length of pred {len(pred)} and length of gt {len(gt)} mismatch"
-
-    for i in range(len(pred)):
-        if pred[i] == 1 and gt[i] == 1:
-            for j in range(i, len(gt)):
-                if pred[j] == 0 and gt[j] == 1:
-                    pred[j] = 1
-                elif pred[j] == 1:
-                    break
-            for k in range(i, 0, -1):
-                if pred[k] == 0 and gt[k] == 1:
-                    pred[k] = 1
-                elif pred[k] == 1:
-                    break
-    
-    return pred
-
-
-####################### Metrics for anomaly generation ####################### 
-
-

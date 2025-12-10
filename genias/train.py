@@ -3,6 +3,7 @@ import torch.optim as optim
 from faiss import IndexFlatL2
 import torch.optim.lr_scheduler as sched
 from sklearn.metrics import precision_recall_curve, auc
+from genias.data_factory.loader import *
 from genias.utils.metric import *
 from genias.utils.loss import *
 
