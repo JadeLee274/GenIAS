@@ -19,6 +19,7 @@ def set_logging_file(
         exp_name: str,
         log_file_path: str,
         time: str,
+        seed: int,
         mode: str = 'w',
         encoding: str = 'utf-8',
 ) -> None:
@@ -39,18 +40,20 @@ def set_logging_file(
     )
     logging.info(f'Logging (File + Stream) Initialized...\n')
     logging.info(f'Experiment name: {exp_name}')
-    logging.info(f'Experiment time: {time}\n')
+    logging.info(f'Experiment time: {time}')
+    logging.info(f'Seed: {seed}')
 
     return
 
 
 def plot_causal_matrix(
     cmtx: Tensor,
+    show_text: bool,
+    epoch: int,
     class_names: Optional[List[str]] = None,
     figsize: Optional[List[int]] = None,
     vmin: Optional[int] = None,
     vmax: Optional[int] = None,
-    show_text: bool = True,
     cmap: str = "magma",
 ) -> Figure:
     """
@@ -79,7 +82,7 @@ def plot_causal_matrix(
     figure = plt.figure(figsize=figsize)
     plt.imshow(cmtx, interpolation="nearest",
                cmap=cmap, vmin=vmin, vmax=vmax)
-    plt.title("Causal matrix")
+    plt.title(f"Epoch {epoch} causal matrix")
     plt.colorbar()
 
     # Use white text if squares are dark; otherwise black.
@@ -102,19 +105,22 @@ def plot_matrix(
     matrix: Matrix,
     plot_dir: str,
     log_step: int,
+    epoch: int,
     figsize: List[int] = [6, 4],
-    cmap: str = 'magma',
 ) -> None:
     if len(matrix.shape) == 3:
         matrix = np.max(matrix, axis=-1)
     
-    figure = plot_causal_matrix(
+    figure: Figure = plot_causal_matrix(
         matrix,
-        figsize=figsize,
         show_text=False,
-        cmap=cmap
+        epoch=epoch,
+        figsize=figsize,
+        epoch=epoch,
     )
-    figure.savefig(os.path.join(plot_dir, f'{name}_{log_step}.pdf'))
+    figure.savefig(
+        os.path.join(plot_dir, f'{name}_{log_step}_epoch_{epoch}.pdf')
+    )
 
     return
 

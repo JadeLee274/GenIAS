@@ -1,4 +1,3 @@
-from tqdm import tqdm
 from cuts_plus import *
 
 
@@ -19,8 +18,8 @@ if __name__ == '__main__':
     args.add_argument(
         '--window-size',
         type=int,
-        default=100,
-        help="Length of window. Default 100.",
+        default=10,
+        help="Length of window. Default 10.",
     )
     args.add_argument(
         '--gpu-num',
@@ -71,6 +70,7 @@ if __name__ == '__main__':
             'log', 'cuts_plus', config.data, f'{time}.log'
         ),
         time=time,
+        seed=config.seed,
     )
 
     if config.data in ['MSL', 'SMAP', 'SMD']:

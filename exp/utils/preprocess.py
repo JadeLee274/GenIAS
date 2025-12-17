@@ -54,6 +54,13 @@ def min_max_normalize(x: Matrix) -> Matrix:
     return (x - min_x) / (max_x - min_x + 1e-4)
 
 
+def train_val_split(train: Matrix, train_ratio: float) -> Tuple[Matrix, Matrix]:
+    train_len = int(len(train) * train_ratio)
+    val = train[train_len:].copy()
+    train = train[:train_len]
+    return train, val
+
+
 def convert_to_windows(data: Matrix, window_size: int) -> Array:
     windows = []
 
@@ -64,28 +71,23 @@ def convert_to_windows(data: Matrix, window_size: int) -> Array:
 
 
 def patch(
-    x: Union[Matrix, Tensor],
-    x_pert: Union[Matrix, Tensor],
+    x: Tensor,
+    x_pert: Tensor,
+    amplitude_list: List[Tensor],
     tau: float = 0.05,
 ) -> Union[Matrix, Tensor]:
     data_dim = x.shape[-1]
     
-    if isinstance(x, Matrix):
-        x_pert_patched = np.empty_like(x)
-    elif isinstance(x, Tensor):
-        x_pert_patched = torch.empty_like(x)
+    x_pert_patched = torch.empty_like(x)
 
     for dim in range(data_dim):
         x_d = x[:, dim]
         x_pert_d = x_pert[:, dim]
-        if isinstance(x, Matrix):
-            deviation = np.sum((x_d - x_pert_d) ** 2)
-            amplitude = np.max(x_d) - np.min(x_d)
-        elif isinstance(x, Tensor):
-            deviation = torch.sum((x_d - x_pert_d) ** 2)
-            amplitude = torch.max(x_d) - torch.min(x_d)
+        amplitude_d = amplitude_list[dim]
 
-        if deviation > tau * amplitude:
+        deviation = torch.sum((x_d - x_pert_d) ** 2)
+
+        if deviation > tau * amplitude_d:
             x_pert_patched[:, dim] = x_pert[:, dim]
         else:
             x_pert_patched[:, dim] = x[:, dim]

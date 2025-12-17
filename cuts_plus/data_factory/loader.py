@@ -53,15 +53,12 @@ class Loader(object):
         scaler = StandardScaler()
 
         data_dir = os.path.join('cuts_plus', 'data', dataset)
+        
         if dataset in ['MSL', 'SMAP', 'SMD']:
             
             train = np.load(os.path.join(data_dir, 'train', f'{subdata}.npy'))
             test = np.load(os.path.join(data_dir, 'test', f'{subdata}.npy'))
             label = np.load(os.path.join(data_dir, 'label', f'{subdata}.npy'))
-        
-        # mean, std = get_mean_std(x=train)
-        # train = (train - mean) / std
-        # test = (test - mean) / std
 
         train, val = train_val_split(train=train, train_ratio=train_ratio)
 

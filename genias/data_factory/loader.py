@@ -86,6 +86,7 @@ class PretextDataset(object):
                 'genias', 'data', 'dataset', dataset, 'train', f'{subdata}.npy'
             )
             data = np.load(data_dir)
+            self.a = data
             self.data_dim = data.shape[-1]
 
         self.mean, self.std = get_mean_std(data)

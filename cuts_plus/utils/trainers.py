@@ -16,8 +16,9 @@ class CUTS_PLUS_Trainer(object):
         time: str,
         data: str,
         subdata: Optional[str],
-        window_size: int,
         batch_size: int,
+        window_size: int,
+        seed: int,
         predict_data: bool = True,
         discover_graph: bool = True,
         gpu_num: int = 0,
@@ -33,6 +34,23 @@ class CUTS_PLUS_Trainer(object):
         graph_end_lr: float = 1e-4,
         graph_plot_step: int = 10,
     ) -> None:
+        # Training infos
+        self.time = time
+        self.data = data
+        self.subdata = subdata
+        self.batch_size = batch_size
+        self.window_size = window_size
+        self.seed = seed
+        self.predict_data = predict_data
+        self.discover_graph = discover_graph
+        self.epochs = epochs
+        self.pred_start_lr = pred_start_lr
+        self.pred_end_lr = pred_end_lr
+        self.gumbel_start_tau = gumbel_start_tau
+        self.gumbel_end_tau = gumbel_end_tau
+        self.graph_start_lr = graph_start_lr
+        self.graph_end_lr = graph_end_lr
+
         self.log_dir = os.path.join('log', 'cuts_plus', data)
         os.makedirs(self.log_dir, exist_ok=True)
 
@@ -173,7 +191,7 @@ class CUTS_PLUS_Trainer(object):
         )
 
         return
-
+    
     def graph_discovery(
         self,
         previous_values: Tensor,
@@ -283,6 +301,7 @@ class CUTS_PLUS_Trainer(object):
                     matrix=graph,
                     plot_dir=self.plot_dir,
                     log_step=graph_discover_step,
+                    epoch=epoch+1,
                 )
                 np.save(
                     file=os.path.join(
@@ -290,7 +309,6 @@ class CUTS_PLUS_Trainer(object):
                     ),
                     arr=graph,
                 )
-            
             epoch_prediction_loss /= len(self.train_loader)
             epoch_graph_loss /= len(self.train_loader)
 
@@ -339,6 +357,7 @@ class CUTS_PLUS_Trainer(object):
                     "pred_optim": self.pred_optimizer.state_dict(),
                     "graph_optim": self.graph_optimizer.state_dict(),
                     "cuasal_matrix": self.model.gt,
+                    "seed": self.seed,
                 }
                 torch.save(
                     obj=checkpoint_best,
@@ -350,10 +369,12 @@ class CUTS_PLUS_Trainer(object):
 
             if (epoch + 1) % self.save_interval == 0:
                 checkpoint = {
+                    "epoch": epoch + 1,
                     "model": self.model.state_dict(),
                     "pred_optim": self.pred_optimizer.state_dict(),
                     "graph_optim": self.graph_optimizer.state_dict(),
                     "cuasal_matrix": self.model.gt,
+                    "seed": self.seed,
                 }
                 torch.save(
                     obj=checkpoint,
