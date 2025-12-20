@@ -238,12 +238,12 @@ class PretextDataset(object):
         else:
             self._negative_pairs = self.negative_pairs
 
-        np.save(
-            file=os.path.join(
-                negative_dir, f'negative_pairs_{self.timestamp}.npy'
-            ),
-            arr=self._negative_pairs,
-        )
+        # np.save(
+        #     file=os.path.join(
+        #         negative_dir, f'negative_pairs_{self.timestamp}.npy'
+        #     ),
+        #     arr=self._negative_pairs,
+        # )
 
         return
     

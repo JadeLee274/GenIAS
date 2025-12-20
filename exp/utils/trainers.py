@@ -415,7 +415,7 @@ class TCNPerturbatorTrainer(object):
         pert_loss_weight: float = 0.1,
         zero_pert_loss_weight: float = 0.01,
         kld_loss_weight: float = 0.1,
-        discriminator_loss_weight: float = 5.0,
+        discriminator_loss_weight: float = 3.0,
         gpu_num: int = 0,
         learning_rate: float = 1e-4,
         epochs: int = 50,
@@ -696,12 +696,16 @@ class PretextTrainer(object):
         window_size: int,
         positive_augementor_time: str,
         perturbator_time: str,
+        downsample: bool,
+        downsample_step: int,
         epochs: int,
         batch_size: int,
         learning_rate: float,
         gpu_num: int,
         num_neighborhoods: int,
-        apply_patch: bool = False,
+        apply_patch: bool,
+        non_constant_dim_tau: float,
+        constant_dim_tau: float,
     ) -> None:
         if subdata is not None:
             logging.info(f'Pretext training on {data} {subdata} start...\n')
@@ -719,7 +723,14 @@ class PretextTrainer(object):
             positive_augmentor_time=positive_augementor_time,
             perturbator_time=perturbator_time,
             processor_num=gpu_num,
+            downsample=downsample,
+            downsample_step=downsample_step,
             apply_patch=apply_patch,
+            non_constant_dim_tau=non_constant_dim_tau,
+            constant_dim_tau=constant_dim_tau,
+            ignore_constant_dim_perturbation=False,
+            save_negative_pairs=True,
+            plot_perturbation=False,
         )
         data_dim = train_dataset.data_dim
 
@@ -756,7 +767,6 @@ class PretextTrainer(object):
         os.makedirs(self.classification_data_dir, exist_ok=True)
 
         self.num_neighborhoods = num_neighborhoods
-        self.apply_patch = apply_patch
         self.seed = seed
 
         return
@@ -815,10 +825,12 @@ class PretextTrainer(object):
                 epoch_loss += prev_loss
 
             epoch_loss /= len(self.train_loader)
-            
-            logging.info(f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}')
-            
-            if (epoch + 1) == self.epochs:
+
+            if (epoch + 1) != self.epochs:
+                logging.info(
+                    f'Epoch {epoch + 1} train loss: {epoch_loss:.4e}'
+                )
+            else:
                 logging.info(
                     f'Epoch {epoch +1} train loss: {epoch_loss:.4e}\n'
                 )

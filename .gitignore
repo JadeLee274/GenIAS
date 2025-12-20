@@ -1,8 +1,9 @@
-# Ignora particular file.
+# Ignora particular file(s).
+classification.py
 debug.py
 dataset.py
 pretext.py
-classification.py
+temp.py
 
 # Ignore all extensions.
 *.csv
@@ -19,6 +20,7 @@ checkpoints/
 classification_dataset/
 data/
 log/
+plots/
 practice/
 __pycache__/
 save/

@@ -1,5 +1,6 @@
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
+import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from exp.utils.common_import import *
 from exp.models.cuts_plus import CUTS_Plus_Net
@@ -15,6 +16,8 @@ class CUTSplusDataset(object):
         mode: str,
         window_size: int,
         train_ratio: float,
+        downsample: bool = False,
+        downsample_step: int = 5,
     ) -> None:
         assert mode in ['train', 'val', 'test'], "'train', 'val', 'test'"
         assert train_ratio < 1.0, "train_ratio must be smaller than 1.0"
@@ -26,61 +29,122 @@ class CUTSplusDataset(object):
         data_dir = os.path.join('cuts_plus', 'data', dataset)
         
         if dataset in ['MSL', 'SMAP', 'SMD']:
-            
-            train = np.load(os.path.join(data_dir, 'train', f'{subdata}.npy'))
-            test = np.load(os.path.join(data_dir, 'test', f'{subdata}.npy'))
-            label = np.load(os.path.join(data_dir, 'label', f'{subdata}.npy'))
+            train_data = np.load(
+                os.path.join(data_dir, 'train', f'{subdata}.npy')
+            )
+            test_data = np.load(
+                os.path.join(data_dir, 'test', f'{subdata}.npy')
+            )
+            test_labels = np.load(
+                os.path.join(data_dir, 'label', f'{subdata}.npy')
+            )
+        
+        elif dataset == 'SWaT':
+            train_data = pd.read_csv(os.path.join(data_dir, 'swat_train2.csv'))
+            train_data = train_data.iloc[1:, 1:-1].to_numpy()
 
-        train, val = train_val_split(train=train, train_ratio=train_ratio)
+            test_data = pd.read_csv(os.path.join(data_dir, 'swat2.csv'))
 
-        train = scaler.fit_transform(train)
-        val = scaler.transform(val)
-        test = scaler.transform(test)
+            test_labels = test_data.iloc[1:, -1] == 1
+            test_labels = test_labels.to_numpy().astype(int)
 
-        self.train: Array = convert_to_windows(
-            data=train,
+            test_data = test_data.iloc[1: 1:-1].to_numpy()
+        
+        elif dataset == 'WADI':
+            train_data = pd.read_csv(
+                os.path.join(data_dir, 'WADI_14days_new.csv')
+            )
+            train_data = train_data.dropna(axis='columns', how='all').dropna()
+            train_data = train_data.iloc[:, 3:].to_numpy()
+
+            test_data = pd.read_csv(
+                os.path.join(data_dir, 'WADI_attackLABLE.csv'),
+                header=1,
+            )
+            test_data = test_data.dropna(axis='columns', how='all').dropna()
+
+            test_labels = test_data.iloc[:, -1] == -1
+            test_labels = test_labels.to_numpy().astype(int)
+
+            test_data = test_data.iloc[:, 3:-1].to_numpy()
+
+        train_data, val_data = train_val_split(
+            train_data=train_data,
+            train_ratio=train_ratio,
+        )
+
+        if downsample:
+            train_data = downsample_data(
+                data=train_data,
+                downsample_step=downsample_step,
+            )
+            val_data = downsample_data(
+                data=val_data,
+                downsample_step=downsample_step,
+            )
+            test_data = downsample_data(
+                data=test_data,
+                downsample_step=downsample_step,
+            )
+            test_labels = downsample_data(
+                data=test_labels,
+                downsample_step=downsample_step,
+            )
+
+        scaler.fit(train_data)
+
+        train_data = scaler.transform(train_data)
+        val_data = scaler.transform(val_data)
+        test_data = scaler.transform(test_data)
+
+        self.train_data: Array = convert_to_windows(
+            data=train_data,
             window_size=window_size,
         )
-        self.val: Array = convert_to_windows(
-            data=val,
+        self.val_data: Array = convert_to_windows(
+            data=val_data,
             window_size=window_size,
         )
-        self.test: Array = convert_to_windows(
-            data=test,
+        self.test_data: Array = convert_to_windows(
+            data=test_data,
+            window_size=window_size,
+        )
+        test_labels = convert_to_windows(
+            data=test_labels,
             window_size=window_size,
         )
         
         labels = []
 
-        for i in range(label.shape[0] - window_size + 1):
-            if np.sum(label[i: i+window_size]) != 0:
+        for i in range(test_labels.shape[0] - window_size + 1):
+            if np.sum(test_labels[i: i+window_size]) != 0:
                 labels.append(1)
             else:
                 labels.append(0)
                 
-        self.labels = np.array(labels).reshape(-1)
+        self.test_labels = np.array(labels).reshape(-1)
 
-        self.data_dim = self.train.shape[-1]
+        self.data_dim = self.train_data.shape[-1]
 
         return
     
     def __len__(self) -> int:
         if self.mode == 'train':
-            return self.train.shape[0]
+            return self.train_data.shape[0]
         elif self.mode == 'val':
-            return self.val.shape[0]
+            return self.val_data.shape[0]
         elif self.mode == 'test':
-            return self.test.shape[0]
+            return self.test_data.shape[0]
         
     def __getitem__(self, idx: int) -> Union[Array, Tuple[Array, Vector]]:
         if self.mode == 'train':
-            return np.float32(self.train[idx])
+            return np.float32(self.train_data[idx])
         elif self.mode == 'val':
-            return np.float32(self.val[idx])
+            return np.float32(self.val_data[idx])
         elif self.mode == 'test':
-            assert self.test.shape[0] == self.labels.shape[0], \
+            assert self.test_data.shape[0] == self.test_labels.shape[0], \
             "test data length and labels length mismatch"
-            return np.float32(self.test[idx]), self.labels[idx]
+            return np.float32(self.test_data[idx]), self.test_labels[idx]
 
 
 class PositiveAugmentor(nn.Module):
@@ -160,6 +224,8 @@ class PerturbationDataset(object):
         subdata: Optional[str],
         mode: str,
         window_size: int,
+        downsample: bool = False,
+        downsample_step: int = 5,
     ) -> None:
         self.mode = mode
 
@@ -177,15 +243,47 @@ class PerturbationDataset(object):
             test_labels = np.load(os.path.join(label_path, f'{subdata}.npy'))
 
         elif data == 'SWaT':
-            train_data_path = os.path.join(data_path, 'swat_train2.csv')
-            test_data_path = os.path.join(data_path, 'swat2.csv')
+            train_data = pd.read_csv(os.path.join(data_path, 'swat_train2.csv'))
+            train_data = train_data.iloc[1:, 1:-1].to_numpy()
             
-            train_data = pd.read_csv(train_data_path)
-            train_data = train_data.values[:, :-1]
-            
-            test_data = pd.read_csv(test_data_path)
-            test_labels = test_data.values[:, -1:]
-            test_data = test_data.values[:, :-1]
+            test_data = pd.read_csv(os.path.join(data_path, 'swat2.csv'))
+
+            test_labels = test_data.iloc[1:, -1] == 1
+            test_labels = test_data.to_numpy().astype(int)
+
+            test_data = test_data.iloc[1: 1:-1].to_numpy()
+        
+        elif data == 'WADI':
+            train_data = pd.read_csv(
+                os.path.join(data_path, 'WADI_14days_new.csv')
+            )
+            train_data = train_data.dropna(axis='columns', how='all').dropna()
+            train_data = train_data.iloc[:, 3:].to_numpy()
+
+            test_data = pd.read_csv(
+                os.path.join(data_path, 'WADI_attackLABLE.csv'),
+                header=1,
+            )
+            test_data = test_data.dropna(axis='columns', how='all').dropna()
+
+            test_labels = test_data.iloc[:, -1] == -1
+            test_labels = test_labels.to_numpy().astype(int)
+
+            test_data = test_data.iloc[:, 3:-1].to_numpy()
+        
+        if downsample:
+            train_data = downsample_data(
+                data=train_data,
+                downsample_step=downsample_step,
+            )
+            test_data = downsample_data(
+                data=test_data,
+                downsample_step=downsample_step,
+            )
+            test_labels = downsample_data(
+                data=test_labels,
+                downsample_step=downsample_step,
+            )
         
         self.scaler = StandardScaler()
         self.scaler.fit(train_data)
@@ -247,13 +345,52 @@ class PretextDataset(object):
         positive_augmentor_time: str,
         perturbator_time: str,
         processor_num: int,
+        downsample: bool,
+        downsample_step: int,
         apply_patch: bool,
+        non_constant_dim_tau: float,
+        constant_dim_tau: float,
+        ignore_constant_dim_perturbation: bool,
+        save_negative_pairs: bool,
+        plot_perturbation: bool,
     ) -> None:
         data_path = os.path.join('exp', 'data', data)
+
         if data in ['MSL', 'SMAP', 'SMD']:
             train_data_path = os.path.join(data_path, 'train')
             train_data = np.load(
                 os.path.join(train_data_path, f'{subdata}.npy')
+            )
+        
+        elif data == 'SWaT':
+            train_data = pd.read_csv(os.path.join(data_path, 'swat_train2.csv'))
+            train_data = train_data.iloc[1:, 1:-1].to_numpy()
+            
+            test_data = pd.read_csv(os.path.join(data_path, 'swat2.csv'))
+            test_data = test_data.iloc[1: 1:-1].to_numpy()
+        
+        elif data == 'WADI':
+            train_data = pd.read_csv(
+                os.path.join(data_path, 'WADI_14days_new.csv')
+            )
+            train_data = train_data.dropna(axis='columns', how='all').dropna()
+            train_data = train_data.iloc[:, 3:].to_numpy()
+
+            test_data = pd.read_csv(
+                os.path.join(data_path, 'WADI_attackLABLE.csv'),
+                header=1,
+            )
+            test_data = test_data.dropna(axis='columns', how='all').dropna()
+            test_data = test_data.iloc[:, 3:-1].to_numpy()
+        
+        if downsample:
+            train_data = downsample_data(
+                data=train_data,
+                downsample_step=downsample_step,
+            )
+            test_data = downsample_data(
+                data=test_data,
+                downsample_step=downsample_step,
             )
         
         self.scaler = StandardScaler()
@@ -265,6 +402,7 @@ class PretextDataset(object):
             data=train_data,
             window_size=window_size,
         )
+
         data_dim = self.anchors.shape[-1]
         self.data_dim = data_dim
         n_nodes = data_dim
@@ -325,32 +463,63 @@ class PretextDataset(object):
             x=anchors,
             causality_matrix=causality_matrix,
         ).detach().cpu().numpy()
-        
+
         # Negative pairs are also normalized.
         _, negative_pairs, _, _ = perturbator.forward(x=anchors)
         
-        amplitude_list = []
-
-        for dim in range(data_dim):
-            x_d: Tensor = anchors[..., dim]
-            amplitude_d = torch.max(x_d) - torch.min(x_d)
-            amplitude_list.append(amplitude_d)
-        
-        if apply_patch:
-            for idx in range(len(negative_pairs)):
-                negative_pairs[idx] = patch(
-                    x=anchors[idx],
-                    x_pert=negative_pairs[idx],
-                    amplitude_list=amplitude_list,
-                )
-        
-        self.negative_pairs = positive_augmentor.forward(
+        negative_pairs = positive_augmentor.forward(
             x=negative_pairs,
             causality_matrix=causality_matrix,
         ).detach().cpu().numpy()
 
-        # Save negative pairs for classification stage. As negative pairs are 
-        # normalized, the normalization at classification stage is unnecessary.
+        negative_pair_without_patch = negative_pairs
+        self.negative_pairs = negative_pairs
+
+        # Patch negative pairs like in GenIAS
+        if apply_patch:
+            negative_pairs_temp = np.empty_like(negative_pairs)
+
+            for i in range(len(anchors)):
+                anchor = self.anchors[i]
+                negative_pair = self.negative_pairs[i]
+                amplitude_list = []
+                amplitude_pert_list = []
+
+                for dim in range(data_dim):
+                    x_d = anchor[..., dim]
+                    x_pert_d = negative_pair[..., dim]
+                    
+                    amplitude_d = np.max(x_d) - np.min(x_d)
+                    amplitude_pert_d = np.max(x_pert_d) - np.min(x_pert_d)
+
+                    amplitude_list.append(amplitude_d)
+                    amplitude_pert_list.append(amplitude_pert_d)
+                
+                negative_pairs_temp[i] = patch(
+                    x=anchor,
+                    x_pert=negative_pair,
+                    amplitude_list=amplitude_list,
+                    amplitude_pert_list=amplitude_pert_list,
+                    non_constant_dim_tau=non_constant_dim_tau,
+                    constant_dim_tau=constant_dim_tau,
+                )
+            
+            self.negative_pairs = negative_pairs_temp
+            negative_pair_with_patch = negative_pairs_temp
+
+        # Ignore perturbation on constant-valued-dimension
+        if ignore_constant_dim_perturbation:
+            negative_pairs_temp = np.empty_like(negative_pairs)
+
+            for idx in range(len(negative_pairs)):
+                negative_pairs_temp[idx] = delete_constant_dim_perturbation(
+                    x=self.anchors[idx],
+                    x_pert=negative_pairs[idx],
+                )
+                
+            self.negative_pairs = negative_pairs_temp
+            negative_pair_with_patch = negative_pairs_temp
+        
         classification_data_save_dir = os.path.join(
             'exp', 'data', 'classification_data', data
         )
@@ -361,15 +530,69 @@ class PretextDataset(object):
             )
         
         os.makedirs(classification_data_save_dir, exist_ok=True)
+
+        if save_negative_pairs:
+            np.save(
+                file=os.path.join(
+                    classification_data_save_dir, f'negative_pairs_{time}.npy'
+                ),
+                arr=self.negative_pairs,
+            )
         
-        np.save(
-            file=os.path.join(
-                classification_data_save_dir, f'negative_pairs_{time}.npy'
-            ),
-            arr=self.negative_pairs,
-        )
+        if plot_perturbation:
+            plot_dir = os.path.join(os.getcwd(), 'plots', data)
+
+            if subdata is not None:
+                plot_dir = os.path.join(plot_dir, subdata)
+            
+            os.makedirs(plot_dir, exist_ok=True)
+
+            num_cols = 5
+            num_rows = data_dim // num_cols
+
+            if data_dim % num_cols != 0:
+                num_rows = (data_dim // num_cols) + 1
+
+            for i in range(len(self.anchors)//window_size):
+                len_ratio = int(num_rows // num_cols)
+                
+                if num_rows % num_cols != 0:
+                    len_ratio = int(num_rows // num_cols) + 1
+                
+                figsize = (20, 10*len_ratio)
+                
+                fig, ax = plt.subplots(num_rows, num_cols, figsize=figsize)
+                idx = i * window_size
+
+                for j in range(0, data_dim):
+                    ax[j//5, j%5].plot(
+                        self.anchors[idx][:, j],
+                        color='red',
+                        linestyle='--',
+                        label='anchor',
+                    )
+                    ax[j//5, j%5].plot(
+                        negative_pair_without_patch[idx][:, j],
+                        color='blue',
+                        linestyle=':',
+                        label='negative pair without patch',
+                    )
+                    if apply_patch or ignore_constant_dim_perturbation:
+                        ax[j//5, j%5].plot(
+                            negative_pair_with_patch[idx][:, j],
+                            color='green',
+                            label='negative pair with patch',
+                        )
+                
+                handles, labels = ax[0, 0].get_legend_handles_labels()
+                fig.legend(handles, labels, loc='upper right')
+                fig.savefig(
+                    os.path.join(plot_dir, f'comparison_patch_{idx}.png')
+                )
+                plt.close()
     
         return
+    
         
     def __len__(self) -> int:
         return self.anchors.shape[0]
@@ -392,30 +615,59 @@ class ClassificationDatasaet(object):
         mode: str = 'train',
     ) -> None:
         assert mode in ['train', 'test'], \
-        "mode must be either 'train' or 'test"
+        "mode must be either 'train' or 'test'"
         self.mode = mode
 
         data_dir = os.path.join('exp', 'data', data)
 
         if data in ['MSL', 'SMAP', 'SMD']:
-            self.train_data = np.load(
+            train_data = np.load(
                 os.path.join(data_dir, 'train', f'{subdata}.npy')
             )
-            self.test_data = np.load(
+            test_data = np.load(
                 os.path.join(data_dir, 'test', f'{subdata}.npy')
             )
-            self.test_labels = np.load(
+            test_labels = np.load(
                 os.path.join(data_dir, 'label', f'{subdata}.npy')
             )
         
-        self.scaler = StandardScaler()
-        self.scaler.fit(self.train_data)
+        elif data == 'SWaT':
+            train_data = pd.read_csv(os.path.join(data_dir, 'swat_train2.csv'))
+            train_data = train_data.iloc[1:, 1:-1].to_numpy()
+            
+            test_data = pd.read_csv(os.path.join(data_dir, 'swat2.csv'))
+
+            test_labels = test_data.iloc[1:, -1] == 1
+            test_labels = test_data.to_numpy().astype(int)
+
+            test_data = test_data.iloc[1: 1:-1].to_numpy()
+        
+        elif data == 'WADI':
+            train_data = pd.read_csv(
+                os.path.join(data_dir, 'WADI_14days_new.csv')
+            )
+            train_data = train_data.dropna(axis='columns', how='all').dropna()
+            train_data = train_data.iloc[:, 3:].to_numpy()
+
+            test_data = pd.read_csv(
+                os.path.join(data_dir, 'WADI_attackLABLE.csv'),
+                header=1,
+            )
+            test_data = test_data.dropna(axis='columns', how='all').dropna()
+
+            test_labels = test_data.iloc[:, -1] == -1
+            test_labels = test_labels.to_numpy().astype(int)
+
+            test_data = test_data.iloc[:, 3:-1].to_numpy()
+        
+        scaler = StandardScaler()
+        scaler.fit(train_data)
 
         # Normalize train/test data
-        self.train_data = self.scaler.transform(self.train_data)
-        self.test_data = self.scaler.transform(self.test_data)
+        train_data = scaler.transform(train_data)
+        test_data = scaler.transform(test_data)
 
-        self.data_dim = self.train_data.shape[-1]
+        self.data_dim = train_data.shape[-1]
         
         classification_data_dir = os.path.join(
             'exp', 'data', 'classification_data', data
@@ -428,7 +680,7 @@ class ClassificationDatasaet(object):
         if mode == 'train':
             # Anchors are normalized within this dataset.
             anchors = convert_to_windows(
-                data=self.train_data,
+                data=train_data,
                 window_size=window_size,
             )
             # Negative pairs are already normallized in the pretext stage.
@@ -513,7 +765,7 @@ class ClassificationDatasaet(object):
 
         elif mode == 'test':
             self.windows = convert_to_windows(
-                data=self.test_data,
+                data=test_data,
                 window_size=window_size,
             )
             labels = convert_to_windows(

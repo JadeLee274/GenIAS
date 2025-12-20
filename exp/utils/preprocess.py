@@ -1,64 +1,31 @@
-import torch.multiprocessing as mp
 from exp.utils.common_import import *
 
 
-def get_mean_std(x: Matrix) -> Vector:
-    """
-    Gets the column-wise mean and standard deviations of data.
+def train_val_split(
+    train_data: Matrix,
+    train_ratio: float,
+) -> Tuple[Matrix, Matrix]:
+    train_data_len = int(len(train_data) * train_ratio)
+    val_data = train_data[train_data_len:].copy()
+    train_data = train_data[:train_data_len]
+    return train_data, val_data
 
-    Parameters:
-        x:   Data.
 
-    Returns:
-        mean vector and standard deviation vector of x.
-    """
-
-    mean = np.mean(x, axis=0)
-    std = np.std(x, axis=0)
-    std = np.where(std == 0.0, 1.0, std)
+def downsample_data(data: Matrix, downsample_step: int) -> Matrix:
+    assert data.ndim == 2, f"data must be 2-dimensional."
     
-    return mean, std
+    data_downsampled = np.empty(
+        [data.shape[0]//downsample_step, data.shape[1]],
+        dtype=data.dtype,
+    )
 
-
-def mean_std_normalize(x: Matrix) -> Matrix:
-    """
-    Normalize each comlum of data using its mean and standard deviation.
-
-    Parameters:
-        x:   Input data.
-        eps: Constant that prevents dividing by zero.
-        
-    Returns:
-        Normlaized data with respect to maen and standard deviation.
-    """
-    mean = np.mean(a=x, axis=0)
-    std = np.std(a=x, axis=0)
-    std = np.where(std == 0.0, 1.0, std)
-
-    return (x - mean) / std
-
-
-def min_max_normalize(x: Matrix) -> Matrix:
-    """
-    Normalize each column of data using minimum and maximum values of this
-    column.
-
-    Parameters:
-        x: Input data.
+    for idx in range(len(data_downsampled)):
+        data_downsampled[idx] = np.median(
+            data[downsample_step*idx: downsample_step*(idx+1)],
+            axis=0,
+        )
     
-    Returns:
-        Normalized data with respect to maximum and minimum.
-    """
-    min_x = np.min(x, axis=0)
-    max_x = np.max(x, axis=0)
-    return (x - min_x) / (max_x - min_x + 1e-4)
-
-
-def train_val_split(train: Matrix, train_ratio: float) -> Tuple[Matrix, Matrix]:
-    train_len = int(len(train) * train_ratio)
-    val = train[train_len:].copy()
-    train = train[:train_len]
-    return train, val
+    return data_downsampled
 
 
 def convert_to_windows(data: Matrix, window_size: int) -> Array:
@@ -70,26 +37,56 @@ def convert_to_windows(data: Matrix, window_size: int) -> Array:
     return np.array(windows, dtype=np.float32)
 
 
-def patch(
-    x: Tensor,
-    x_pert: Tensor,
-    amplitude_list: List[Tensor],
-    tau: float = 0.05,
-) -> Union[Matrix, Tensor]:
+def delete_constant_dim_perturbation(x: Matrix, x_pert: Matrix) -> Matrix:
     data_dim = x.shape[-1]
+    x_pert_temp = np.empty_like(x)
     
-    x_pert_patched = torch.empty_like(x)
+    for d in range(data_dim):
+        x_d = x[:, d]
+        x_pert_d = x_pert[:, d]
+        if np.max(x_d) == np.min(x_d):
+            x_pert_temp[:, d] = x_d
+        else:
+            x_pert_temp[:, d] = x_pert_d
+    
+    return x_pert_temp
+
+
+def patch(
+    x: Matrix,
+    x_pert: Matrix,
+    amplitude_list: List[float],
+    amplitude_pert_list: List[float],
+    non_constant_dim_tau: float,
+    constant_dim_tau: float,
+) -> Matrix:
+    data_dim = x.shape[-1]
+    x_pert_temp = np.empty_like(x)
 
     for dim in range(data_dim):
         x_d = x[:, dim]
         x_pert_d = x_pert[:, dim]
+        x_pert_temp_d = x_pert_temp[:, dim]
         amplitude_d = amplitude_list[dim]
+        amplitude_pert_d = amplitude_pert_list[dim]
 
-        deviation = torch.sum((x_d - x_pert_d) ** 2)
+        for i in range(len(x_d)):
+            point_i = x_d[i]
+            point_i_pert = x_pert_d[i]
+            deviation_nonconstant = (point_i - point_i_pert) ** 2
+            deviation_nonconstant = np.abs(point_i - point_i_pert)
 
-        if deviation > tau * amplitude_d:
-            x_pert_patched[:, dim] = x_pert[:, dim]
-        else:
-            x_pert_patched[:, dim] = x[:, dim]
+            # Patching on non-constant dimension
+            if amplitude_d != 0:
+                if deviation_nonconstant > non_constant_dim_tau * amplitude_d:
+                    x_pert_temp_d[i] = point_i_pert
+                else:
+                    x_pert_temp_d[i] = point_i
+            # Patching on constant dimension
+            elif amplitude_d == 0:
+                if deviation_nonconstant > constant_dim_tau * amplitude_pert_d:
+                    x_pert_temp_d[i] = point_i_pert
+                else:
+                    x_pert_temp_d[i] = point_i
     
-    return x_pert_patched
+    return x_pert_temp

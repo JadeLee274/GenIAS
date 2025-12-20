@@ -11,8 +11,12 @@ def main(
     gpu_num: int,
     positive_augmentor_time: Optional[str],
     perturbator_time: Optional[str],
-    apply_patch: bool,
+    downsample: bool,
+    downsample_step: int,
     seed: int,
+    apply_patch: bool,
+    non_constant_dim_tau: float,
+    constant_dim_tau: float,
 ) -> None:
     assert task in ['cuts_plus', 'perturbation', 'pretext_classification'], \
            "'cuts_plus', 'perturbator', 'pretext_classification'"
@@ -58,7 +62,7 @@ def main(
             )
         elif data in ['SWaT', 'WADI']:
             logging.info(f'Training perturbator model in {data}...\n')
-
+        
         trainer = TCNPerturbatorTrainer(
             time=time,
             data=data,
@@ -67,6 +71,7 @@ def main(
             window_size=window_size,
             seed=seed,
         )
+        
         if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
             logging.info('Experiment setup:')
             logging.info(f'- Batch size: {trainer.batch_size}')
@@ -94,6 +99,24 @@ def main(
         return
 
     elif task == 'pretext_classification':
+        if data in  ['MSL', 'SMAP', 'SMD']:
+            logging.info(
+                f'Training classifier model on {data} {subdata}...\n'
+            )
+        elif data in ['SWaT', 'WADI']:
+            logging.info(f'Training classifier model in {data}...\n')
+        
+        if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
+            logging.info('Experiment setup:')
+            logging.info(f'- Data: {data}')
+            logging.info(
+                f'- Positive augmentor timestamp: {positive_augmentor_time}')
+            logging.info(f'- Perturbator timestamp: {perturbator_time}')
+            logging.info(f'- Apply patch: {apply_patch}')
+            logging.info(f'- Non-constant dim tau: {non_constant_dim_tau}')
+            logging.info(f'- Constant dim tau: {constant_dim_tau}')
+            logging.info(f'- Seed: {seed}\n')
+        
         pretext_trainer = PretextTrainer(
             time=time,
             data=data,
@@ -102,22 +125,17 @@ def main(
             window_size=window_size,
             positive_augementor_time=positive_augmentor_time,
             perturbator_time=perturbator_time,
-            apply_patch=apply_patch,
+            downsample=downsample,
+            downsample_step=downsample_step,
             epochs=30,
             batch_size=batch_size,
             learning_rate=1e-3,
             gpu_num=gpu_num,
             num_neighborhoods=5,
+            apply_patch=apply_patch,
+            non_constant_dim_tau=non_constant_dim_tau,
+            constant_dim_tau=constant_dim_tau,
         )
-        
-        if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
-            logging.info('Experiment setup:')
-            logging.info(f'- Data: {config.data}')
-            logging.info(
-                f'- Positive augmentor timestamp: {positive_augmentor_time}')
-            logging.info(f'- Perturbator timestamp: {perturbator_time}')
-            logging.info(f'- Apply patch: {pretext_trainer.apply_patch}')
-            logging.info(f'- Seed: {config.seed}\n')
         
         pretext_trainer.train()
         pretext_trainer.select_neighbors()
@@ -165,11 +183,6 @@ if __name__ == '__main__':
         help="Length of window. Default 10.",
     )
     args.add_argument(
-        '--apply-patch',
-        type=str2bool,
-        help="Whether to apply patch or not.",
-    )
-    args.add_argument(
         '--gpu-num',
         type=int,
         default=0,
@@ -191,6 +204,33 @@ if __name__ == '__main__':
         type=str,
         help="The timestamp of pre-trained perturbator.",
     )
+    args.add_argument(
+        '--downsample',
+        type=str2bool,
+        default=False,
+        help="Whether to downsample data or not. Default False."
+    )
+    args.add_argument(
+        '--downsample-step',
+        type=int,
+        help="Step size of downsampling.",
+    )
+    args.add_argument(
+        '--apply-patch',
+        type=str2bool,
+        default=True,
+        help="Apply patching algorithm for pretext. Default True.",
+    )
+    args.add_argument(
+        '--non-constant-dim-tau',
+        type=float,
+        help="Determines threshold when applying patch to non-constant dim.",
+    )
+    args.add_argument(
+        '--constant-dim-tau',
+        type=float,
+        help="Determines threshold when applying patch to constant dim."
+    )
     config = args.parse_args()
 
     if config.task == 'cuts_plus':
@@ -198,10 +238,15 @@ if __name__ == '__main__':
     else:
         batch_size = 256
         if config.task == 'pretext_classification':
-            assert config.positive_augmentor_time is not None \
-                   and config.perturbator_time is not None, \
-                   "positive augmentor and perturbator timestamp required."
-
+            assert config.positive_augmentor_time is not None, \
+                   "positive augmentor timestamp required."
+            assert config.perturbator_time is not None, \
+                   "perturbator timestamp required."
+            assert config.non_constant_dim_tau is not None, \
+                   "tau for non-constant-valued dimension needed."
+            assert config.constant_dim_tau is not None, \
+                   "tau for constant-valued dimension needed."
+    
     fix_seed_all(seed=config.seed)
     
     time = datetime.datetime.now()
@@ -249,8 +294,12 @@ if __name__ == '__main__':
                     gpu_num=config.gpu_num,
                     positive_augmentor_time=config.positive_augmentor_time,
                     perturbator_time=config.perturbator_time,
-                    apply_patch=config.apply_patch,
+                    downsample=config.downsample,
+                    downsample_step=config.downsample_step,
                     seed=config.seed,
+                    apply_patch=config.apply_patch,
+                    non_constant_dim_tau=config.non_constant_dim_tau,
+                    constant_dim_tau=config.constant_dim_tau,
                 )
                 f1_list.append(f1)
                 tp_list.append(tp)
@@ -295,7 +344,11 @@ if __name__ == '__main__':
                     gpu_num=config.gpu_num,
                     positive_augmentor_time=config.positive_augmentor_time,
                     perturbator_time=config.perturbator_time,
-                    apply_patch=config.apply_patch,
+                    downsample=config.downsample,
+                    downsample_step=config.downsample_step,
                     seed=config.seed,
+                    apply_patch=config.apply_patch,
+                    non_constant_dim_tau=config.non_constant_dim_tau,
+                    constant_dim_tau=config.constant_dim_tau,
                 )
         
