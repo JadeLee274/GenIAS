@@ -12,12 +12,18 @@ def train_val_split(
 
 
 def downsample_data(data: Matrix, downsample_step: int) -> Matrix:
-    assert data.ndim == 2, f"data must be 2-dimensional."
-    
-    data_downsampled = np.empty(
-        [data.shape[0]//downsample_step, data.shape[1]],
-        dtype=data.dtype,
-    )
+    assert data.ndim in [1, 2], "Data must be 1- or 2-dimensional."
+
+    if data.ndim == 1:
+        data_downsampled = np.empty(
+            data.shape[0]//downsample_step,
+            dtype=data.dtype,
+        )
+    elif data.ndim == 2:
+        data_downsampled = np.empty(
+            [data.shape[0]//downsample_step, data.shape[1]],
+            dtype=data.dtype,
+        )
 
     for idx in range(len(data_downsampled)):
         data_downsampled[idx] = np.median(
@@ -57,6 +63,7 @@ def patch(
     x_pert: Matrix,
     amplitude_list: List[float],
     amplitude_pert_list: List[float],
+    deviation_mode: str,
     non_constant_dim_tau: float,
     constant_dim_tau: float,
 ) -> Matrix:
@@ -73,18 +80,23 @@ def patch(
         for i in range(len(x_d)):
             point_i = x_d[i]
             point_i_pert = x_pert_d[i]
-            deviation_nonconstant = (point_i - point_i_pert) ** 2
-            deviation_nonconstant = np.abs(point_i - point_i_pert)
 
+            if deviation_mode == 'abs':
+                deviation = np.abs(point_i - point_i_pert)
+            elif deviation_mode == 'square':
+                deviation = (point_i - point_i_pert) ** 2
+            else:
+                raise ValueError("Deviation mode should be 'abs' or 'square'")
+            
             # Patching on non-constant dimension
             if amplitude_d != 0:
-                if deviation_nonconstant > non_constant_dim_tau * amplitude_d:
+                if deviation > non_constant_dim_tau * amplitude_d:
                     x_pert_temp_d[i] = point_i_pert
                 else:
                     x_pert_temp_d[i] = point_i
             # Patching on constant dimension
             elif amplitude_d == 0:
-                if deviation_nonconstant > constant_dim_tau * amplitude_pert_d:
+                if deviation > constant_dim_tau * amplitude_pert_d:
                     x_pert_temp_d[i] = point_i_pert
                 else:
                     x_pert_temp_d[i] = point_i

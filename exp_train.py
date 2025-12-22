@@ -15,6 +15,8 @@ def main(
     downsample_step: int,
     seed: int,
     apply_patch: bool,
+    patch_after: str,
+    deviation_mode: str,
     non_constant_dim_tau: float,
     constant_dim_tau: float,
 ) -> None:
@@ -113,6 +115,8 @@ def main(
                 f'- Positive augmentor timestamp: {positive_augmentor_time}')
             logging.info(f'- Perturbator timestamp: {perturbator_time}')
             logging.info(f'- Apply patch: {apply_patch}')
+            logging.info(f'- Patch after: {patch_after}')
+            logging.info(f'- Deviation mode: {deviation_mode}')
             logging.info(f'- Non-constant dim tau: {non_constant_dim_tau}')
             logging.info(f'- Constant dim tau: {constant_dim_tau}')
             logging.info(f'- Seed: {seed}\n')
@@ -133,6 +137,8 @@ def main(
             gpu_num=gpu_num,
             num_neighborhoods=5,
             apply_patch=apply_patch,
+            patch_after=patch_after,
+            deviation_mode=deviation_mode,
             non_constant_dim_tau=non_constant_dim_tau,
             constant_dim_tau=constant_dim_tau,
         )
@@ -222,6 +228,18 @@ if __name__ == '__main__':
         help="Apply patching algorithm for pretext. Default True.",
     )
     args.add_argument(
+        '--patch-after',
+        type=str,
+        default='after_positive_augmentor',
+        help="Patch will be applied after perturbator or positive_augmentor."
+    )
+    args.add_argument(
+        '--deviation-mode',
+        type=str,
+        default='abs',
+        help="The mode of deviation for patching. Default 'abs'."
+    )
+    args.add_argument(
         '--non-constant-dim-tau',
         type=float,
         help="Determines threshold when applying patch to non-constant dim.",
@@ -298,6 +316,7 @@ if __name__ == '__main__':
                     downsample_step=config.downsample_step,
                     seed=config.seed,
                     apply_patch=config.apply_patch,
+                    deviation_mode=config.deviation_mode,
                     non_constant_dim_tau=config.non_constant_dim_tau,
                     constant_dim_tau=config.constant_dim_tau,
                 )

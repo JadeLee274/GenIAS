@@ -704,6 +704,8 @@ class PretextTrainer(object):
         gpu_num: int,
         num_neighborhoods: int,
         apply_patch: bool,
+        patch_after: str,
+        deviation_mode: str,
         non_constant_dim_tau: float,
         constant_dim_tau: float,
     ) -> None:
@@ -726,9 +728,10 @@ class PretextTrainer(object):
             downsample=downsample,
             downsample_step=downsample_step,
             apply_patch=apply_patch,
+            patch_after=patch_after,
+            deviation_mode=deviation_mode,
             non_constant_dim_tau=non_constant_dim_tau,
             constant_dim_tau=constant_dim_tau,
-            ignore_constant_dim_perturbation=False,
             save_negative_pairs=True,
             plot_perturbation=False,
         )
