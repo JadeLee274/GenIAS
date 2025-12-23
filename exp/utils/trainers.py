@@ -21,6 +21,8 @@ class CUTSplusTrainer(object):
         time: str,
         data: str,
         subdata: Optional[str],
+        downsample: bool,
+        downsample_step: int,
         batch_size: int,
         window_size: int,
         seed: int,
@@ -45,6 +47,7 @@ class CUTSplusTrainer(object):
         self.subdata = subdata
         self.batch_size = batch_size
         self.window_size = window_size
+        self.downsample = downsample
         self.seed = seed
         self.predict_data = predict_data
         self.discover_graph = discover_graph
@@ -60,6 +63,9 @@ class CUTSplusTrainer(object):
         self.graph_start_lr = graph_start_lr
         self.graph_end_lr = graph_end_lr
         self.graph_plot_step = graph_plot_step
+
+        if downsample:
+            self.downsample_step = downsample_step
 
         self.log_dir = os.path.join('log', 'cuts_plus', data)
         os.makedirs(self.log_dir, exist_ok=True)
@@ -88,7 +94,9 @@ class CUTSplusTrainer(object):
             subdata=subdata,
             mode='train',
             window_size=window_size,
-            train_ratio=0.8
+            train_ratio=0.8,
+            downsample=downsample,
+            downsample_step=downsample_step,
         )
         self.train_loader = DataLoader(
             dataset=train_dataset,
@@ -104,6 +112,8 @@ class CUTSplusTrainer(object):
             mode='val',
             window_size=window_size,
             train_ratio=0.8,
+            downsample=downsample,
+            downsample_step=downsample_step,
         )
         self.val_loader = DataLoader(
             dataset=val_dataset,
@@ -407,6 +417,8 @@ class TCNPerturbatorTrainer(object):
         subdata: Optional[str],
         batch_size: int,
         window_size: int,
+        downsample: bool,
+        downsample_step: int,
         seed: int,
         recon_pert_mse_delta_min: float = 0.1,
         pert_mse_delta_min: float = 0.2,
@@ -427,6 +439,8 @@ class TCNPerturbatorTrainer(object):
         self.subdata = subdata
         self.batch_size = batch_size
         self.window_size = window_size
+        self.downsample = downsample
+        self.downsample_step = downsample_step
         self.recon_pert_mse_delta_min = recon_pert_mse_delta_min
         self.pert_mse_delta_min = pert_mse_delta_min
         self.prior_var = prior_var
@@ -446,6 +460,8 @@ class TCNPerturbatorTrainer(object):
             subdata=subdata,
             mode='train',
             window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
         )
         self.train_loader = DataLoader(
             dataset=self.train_dataset,
@@ -457,6 +473,8 @@ class TCNPerturbatorTrainer(object):
             subdata=subdata,
             mode='test',
             window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
         )
         
         # Set device

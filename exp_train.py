@@ -28,6 +28,8 @@ def main(
             time=time,
             data=data,
             subdata=subdata,
+            downsample=downsample,
+            downsample_step=downsample_step,
             batch_size=batch_size,
             window_size=window_size,
             seed=seed,
@@ -36,6 +38,11 @@ def main(
             logging.info('Experiment setup:')
             logging.info(f'- Batch size: {trainer.batch_size}')
             logging.info(f'- Window size: {trainer.window_size}')
+            logging.info(f'- Downsample: {trainer.downsample}')
+
+            if downsample:
+                logging.info(f'- Downsamle step: {trainer.downsample_step}')
+
             logging.info(f'- Data prediction: {trainer.predict_data}')
             logging.info(f'- Graph discovery: {trainer.discover_graph}')
             logging.info(f'- Prediction start lr: {trainer.pred_start_lr}')
@@ -71,6 +78,8 @@ def main(
             subdata=subdata,
             batch_size=batch_size,
             window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
             seed=seed,
         )
         
@@ -78,6 +87,11 @@ def main(
             logging.info('Experiment setup:')
             logging.info(f'- Batch size: {trainer.batch_size}')
             logging.info(f'- Window size: {trainer.window_size}')
+            logging.info(f'- Downsample: {trainer.downsample}')
+
+            if downsample:
+                logging.info(f'- Downsample step: {trainer.downsample_step}')
+            
             logging.info(
                 f'- Recon delta min: {trainer.recon_pert_mse_delta_min}'
             )
@@ -219,7 +233,8 @@ if __name__ == '__main__':
     args.add_argument(
         '--downsample-step',
         type=int,
-        help="Step size of downsampling.",
+        default=5,
+        help="Step size of downsampling. Default 5.",
     )
     args.add_argument(
         '--apply-patch',
@@ -230,7 +245,7 @@ if __name__ == '__main__':
     args.add_argument(
         '--patch-after',
         type=str,
-        default='after_positive_augmentor',
+        default='positive_augmentor',
         help="Patch will be applied after perturbator or positive_augmentor."
     )
     args.add_argument(
@@ -250,6 +265,12 @@ if __name__ == '__main__':
         help="Determines threshold when applying patch to constant dim."
     )
     config = args.parse_args()
+
+    assert config.task in [
+        'cuts_plus',
+        'perturbation',
+        'pretext_classification',
+    ], "task is one of 'cuts_plus', 'perturbation', 'pretext_classification'."
 
     if config.task == 'cuts_plus':
         batch_size = 100
@@ -316,6 +337,7 @@ if __name__ == '__main__':
                     downsample_step=config.downsample_step,
                     seed=config.seed,
                     apply_patch=config.apply_patch,
+                    patch_after=config.patch_after,
                     deviation_mode=config.deviation_mode,
                     non_constant_dim_tau=config.non_constant_dim_tau,
                     constant_dim_tau=config.constant_dim_tau,
@@ -367,7 +389,62 @@ if __name__ == '__main__':
                     downsample_step=config.downsample_step,
                     seed=config.seed,
                     apply_patch=config.apply_patch,
+                    patch_after=config.patch_after,
                     non_constant_dim_tau=config.non_constant_dim_tau,
                     constant_dim_tau=config.constant_dim_tau,
                 )
+    
+    elif config.data in ['SWaT', 'WADI']:
+        if config.task == 'pretext_classification':
+            f1, tp, fp, fn, aucpr = main(
+                time=time,
+                task=config.task,
+                data=config.data,
+                subdata=None,
+                window_size=config.window_size,
+                batch_size=batch_size,
+                gpu_num=config.gpu_num,
+                positive_augmentor_time=config.positive_augmentor_time,
+                perturbator_time=config.pertrbator_time,
+                downsample=config.downsample,
+                downsample_step=config.downsample_ste,
+                seed=config.seed,
+                apply_patch=config.apply_patch,
+                patch_after=config.patch_after,
+                deviation_mode=config.deviation_mode,
+                non_constant_dim_tau=config.non_constant_dim_tau,
+                constant_dim_tau=config.constant_dim_tau,
+            )
+
+            precision = tp / (tp + fp)
+            recall = tp / (tp + fn)
+
+            logging.info('Scores:')
+            logging.info(f'- F1: {round(f1, 4)}')
+            logging.info(f'- Precision: {round(precision, 4)}')
+            logging.info(f'- Recall: {round(recall, 4)}')
+            logging.info(f'- AUC-PR: {round(aucpr, 4)}')
+            logging.info(f'- True positives: {round(tp, 4)}')
+            logging.info(f'- False positives: {round(fp, 4)}')
+            logging.info(f'- False negatives: {round(fn, 4)}')
         
+        else:
+            main(
+                time=time,
+                task=config.task,
+                data=config.data,
+                subdata=None,
+                window_size=config.window_size,
+                batch_size=batch_size,
+                gpu_num=config.gpu_num,
+                positive_augmentor_time=config.positive_augmentor_time,
+                perturbator_time=config.perturbator_time,
+                downsample=config.downsample,
+                downsample_step=config.downsample_step,
+                seed=config.seed,
+                apply_patch=config.apply_patch,
+                patch_after=config.patch_after,
+                deviation_mode=config.deviation_mode,
+                non_constant_dim_tau=config.non_constant_dim_tau,
+                constant_dim_tau=config.constant_dim_tau,
+            )

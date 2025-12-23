@@ -469,6 +469,10 @@ class PretextDataset(object):
         # Negative pairs are also normalized.
         _, negative_pairs, _, _ = perturbator.forward(x=anchors)
 
+        if apply_patch:
+            assert patch_after in ['perturbator', 'positive_augmentor'], \
+            "patch after 'perturbator' or 'positive_augmentor'"
+
         if (apply_patch and patch_after == 'perturbator'):
             negative_pairs_without_patch = negative_pairs
             negative_pairs = negative_pairs.detach().cpu().numpy()
@@ -669,6 +673,8 @@ class ClassificationDatasaet(object):
         data: str,
         subdata: Optional[str],
         window_size: int,
+        downsample: bool,
+        downsample_step: int,
         mode: str = 'train',
     ) -> None:
         assert mode in ['train', 'test'], \
@@ -716,6 +722,20 @@ class ClassificationDatasaet(object):
             test_labels = test_labels.to_numpy().astype(int)
 
             test_data = test_data.iloc[:, 3:-1].to_numpy()
+
+        if downsample:
+            train_data = downsample_data(
+                data=train_data,
+                downsample_step=downsample_step,
+            )
+            test_data = downsample_data(
+                data=test_data,
+                downsample_step=downsample_step,
+            )
+            test_labels = downsample_data(
+                data=test_labels,
+                downsample_step=downsample_step,
+            )
         
         scaler = StandardScaler()
         scaler.fit(train_data)
