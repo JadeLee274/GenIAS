@@ -602,7 +602,15 @@ class TCNPerturbatorTrainer(object):
         
         return
     
-    def train(self) -> None:
+    def train(self, retrain: bool, restart_epoch: int) -> None:
+        if retrain:
+            self.perturbator.init_perturbator(
+                time=self.time,
+                data=self.data,
+                subdata=self.subdata,
+                epoch=restart_epoch,
+            )
+        
         self.perturbator.train()
         self.discriminator.train()
 
@@ -970,6 +978,8 @@ class ClassificationTrainer(object):
         data: str,
         subdata: Optional[str],
         window_size: int,
+        downsample: bool,
+        downsample_step: int,
         gpu_num: int,
         epochs: int,
         batch_size: int,
@@ -985,6 +995,8 @@ class ClassificationTrainer(object):
             data=data,
             subdata=subdata,
             window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
             mode='train',
         )
         self.test_dataset = ClassificationDatasaet(
@@ -992,6 +1004,8 @@ class ClassificationTrainer(object):
             data=data,
             subdata=subdata,
             window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
             mode='test',
         )
         data_dim = train_dataset.data_dim

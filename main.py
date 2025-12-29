@@ -210,6 +210,107 @@ def main(
             logging.info(f'- AUC-PR std: {round(auc_pr_std, 4)}')
             logging.info(f'- Macro F1: {round(f1_macro, 4)}')
 
+    elif dataset == 'SWaT':
+        if task == 'pretext':
+            pretext(
+                dataset=dataset,
+                timestamp=timestamp,
+                subdata=subdata,
+                scheme=pretext_scheme,
+                inject_different_anomalies=inject_different_anomalies,
+                use_pretrained_vae=use_pretrained_vae,
+                mix_step=mix_step,
+                batch_size=batch_size,
+                gpu_num=gpu_num,
+                cut_negative_pairs=cut_negative_pairs,
+            )
+
+        elif task == 'classification':
+            best_f1_score, best_tp, best_fp, best_fn, auc_pr = \
+                classification(
+                    dataset=dataset,
+                    timestamp=timestamp,
+                    subdata=subdata,
+                    scheme=pretext_scheme,
+                    gpu_num=gpu_num,
+                    batch_size=batch_size,
+                )
+            logging.info(f'- True Positives: {best_tp}')
+            logging.info(f'- False Positives: {best_fp}')
+            logging.info(f'- False Negatives: {best_fn}\n')
+
+        elif task == 'pretext_classification':
+            pretext(
+                dataset=dataset,
+                timestamp=timestamp,
+                subdata=None,
+                scheme=pretext_scheme,
+                inject_different_anomalies=inject_different_anomalies,
+                use_pretrained_vae=use_pretrained_vae,
+                mix_step=mix_step,
+                batch_size=batch_size,
+                gpu_num=gpu_num,
+                cut_negative_pairs=cut_negative_pairs,
+            )
+            best_f1_score, best_tp, best_fp, best_fn, auc_pr = \
+                classification(
+                    dataset=dataset,
+                    timestamp=timestamp,
+                    subdata=subdata,
+                    scheme=pretext_scheme,
+                    gpu_num=gpu_num,
+                    batch_size=batch_size,
+                )
+            best_f1_list.append(best_f1_score)
+            best_tp_list.append(best_tp)
+            best_fp_list.append(best_fp)
+            best_fn_list.append(best_fn)
+            auc_pr_list.append(auc_pr)
+
+            logging.info(f'- True Positives: {best_tp}')
+            logging.info(f'- False Positives: {best_fp}')
+            logging.info(f'- False Negatives: {best_fn}\n')
+        
+        elif task == 'vae_train':
+            vae_train(
+                dataset=dataset,
+                timestamp=timestamp,
+                subdata=subdata,
+                depth=vae_depth,
+                gpu_num=gpu_num,
+                prior_var=vae_prior_var,
+                recon_weight=vae_recon_weight,
+                pert_weight=vae_pert_weight,
+                zero_pert_weight=vae_zero_pert_weight,
+                kld_weight=vae_kld_weight,
+            )
+
+        if task in ['classification', 'pretext_classification']:
+            best_f1_list = np.array(best_f1_list)
+            best_tp_list = np.array(best_tp_list)
+            best_fp_list = np.array(best_fp_list)
+            best_fn_list = np.array(best_fn_list)
+            auc_pr_list = np.array(auc_pr_list)
+
+            f1_score_best = np.max(best_f1_list)
+            precision, recall, f1_micro = mirco_f1(
+                tp_list=best_tp_list,
+                fp_list=best_fp_list,
+                fn_list=best_fn_list
+            )
+            auc_pr_mean = np.mean(auc_pr_list)
+            auc_pr_std = np.std(auc_pr_list)
+            f1_macro = macro_f1(f1_list=best_f1_list)
+
+            logging.info('Scores')
+            logging.info(f'- Best F1: {round(f1_score_best, 4)}')
+            logging.info(f'- Micro F1: {round(f1_micro, 4)}')
+            logging.info(f'- Precision: {round(precision, 4)}')
+            logging.info(f'- Recall: {round(recall, 4)}')
+            logging.info(f'- AUC-PR mean: {round(auc_pr_mean, 4)}')
+            logging.info(f'- AUC-PR std: {round(auc_pr_std, 4)}')
+            logging.info(f'- Macro F1: {round(f1_macro, 4)}')
+
     return
 
 

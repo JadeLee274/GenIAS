@@ -6,6 +6,8 @@ def main(
     task: str,
     data: str,
     subdata: Optional[str],
+    retrain: bool,
+    restart_epoch: int,
     window_size: int,
     batch_size: int,
     gpu_num: int,
@@ -20,8 +22,12 @@ def main(
     non_constant_dim_tau: float,
     constant_dim_tau: float,
 ) -> None:
-    assert task in ['cuts_plus', 'perturbation', 'pretext_classification'], \
-           "'cuts_plus', 'perturbator', 'pretext_classification'"
+    assert task in [
+        'cuts_plus',
+        'perturbation',
+        'pretext_classification',
+        'all'
+    ], "'cuts_plus', 'perturbator', 'pretext_classification', 'all'"
 
     if task == 'cuts_plus':
         trainer = CUTSplusTrainer(
@@ -128,11 +134,19 @@ def main(
             logging.info(
                 f'- Positive augmentor timestamp: {positive_augmentor_time}')
             logging.info(f'- Perturbator timestamp: {perturbator_time}')
+            logging.info(f'- Downsample: {downsample}')
+
+            if downsample:
+                logging.info(f'- Downsample step: {downsample_step}')
+            
             logging.info(f'- Apply patch: {apply_patch}')
-            logging.info(f'- Patch after: {patch_after}')
-            logging.info(f'- Deviation mode: {deviation_mode}')
-            logging.info(f'- Non-constant dim tau: {non_constant_dim_tau}')
-            logging.info(f'- Constant dim tau: {constant_dim_tau}')
+
+            if apply_patch:
+                logging.info(f'- Patch after: {patch_after}')
+                logging.info(f'- Deviation mode: {deviation_mode}')
+                logging.info(f'- Non-constant dim tau: {non_constant_dim_tau}')
+                logging.info(f'- Constant dim tau: {constant_dim_tau}')
+                
             logging.info(f'- Seed: {seed}\n')
         
         pretext_trainer = PretextTrainer(
@@ -165,9 +179,87 @@ def main(
             data=data,
             subdata=subdata,
             window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
             gpu_num=gpu_num,
             epochs=100,
             batch_size=batch_size,
+            learning_rate=1e-2,
+        )
+        classification_trainer.train()
+        f1, tp, fp, fn, aucpr = classification_trainer.inference()
+
+        return f1, tp, fp, fn, aucpr
+    
+    elif task == 'all':
+        if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
+            logging.info('Experiment setup:')
+            logging.info(f'- Seed: {seed}')
+            logging.info(f'- Downsample: {downsample}')
+
+            if downsample:
+                logging.info(f'- Downsample step: {downsample_step}\n')
+        
+        cuts_plus_trainer = CUTSplusTrainer(
+            time=time,
+            data=data,
+            subdata=subdata,
+            downsample=downsample,
+            downsample_step=downsample_step,
+            batch_size=100,
+            window_size=window_size,
+            seed=seed,
+            gpu_num=gpu_num,
+        )
+        cuts_plus_trainer.train()
+
+        perturbation_trainer = TCNPerturbatorTrainer(
+            time=time,
+            data=data,
+            subdata=subdata,
+            batch_size=256,
+            window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
+            seed=seed,
+            gpu_num=gpu_num,
+        )
+        perturbation_trainer.train()
+        perturbation_trainer.eval()
+
+        pretext_trainer = PretextTrainer(
+            time=time,
+            data=data,
+            subdata=subdata,
+            window_size=window_size,
+            positive_augementor_time=time,
+            perturbator_time=time,
+            downsample=downsample,
+            downsample_step=downsample_step,
+            epochs=30,
+            batch_size=256,
+            learning_rate=1e-3,
+            gpu_num=gpu_num,
+            num_neighborhoods=5,
+            apply_patch=apply_patch,
+            patch_after=patch_after,
+            deviation_mode=deviation_mode,
+            non_constant_dim_tau=non_constant_dim_tau,
+            constant_dim_tau=constant_dim_tau,
+        )
+        pretext_trainer.train()
+        pretext_trainer.select_neighbors()
+
+        classification_trainer = ClassificationTrainer(
+            time=time,
+            data=data,
+            subdata=subdata,
+            window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
+            gpu_num=gpu_num,
+            epochs=100,
+            batch_size=256,
             learning_rate=1e-2,
         )
         classification_trainer.train()
@@ -211,8 +303,7 @@ if __name__ == '__main__':
     args.add_argument(
         '--seed',
         type=int,
-        default=42,
-        help='Seed. Default 42.'
+        help='Seed.'
     )
     args.add_argument(
         '--positive-augmentor-time',
@@ -286,7 +377,8 @@ if __name__ == '__main__':
             assert config.constant_dim_tau is not None, \
                    "tau for constant-valued dimension needed."
     
-    fix_seed_all(seed=config.seed)
+    if config.seed is not None:
+        fix_seed_all(seed=config.seed)
     
     time = datetime.datetime.now()
     time = time.strftime('%m%d_%H%M')
@@ -390,6 +482,7 @@ if __name__ == '__main__':
                     seed=config.seed,
                     apply_patch=config.apply_patch,
                     patch_after=config.patch_after,
+                    deviation_mode=config.deviation_mode,
                     non_constant_dim_tau=config.non_constant_dim_tau,
                     constant_dim_tau=config.constant_dim_tau,
                 )

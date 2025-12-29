@@ -171,8 +171,12 @@ class PositiveAugmentor(nn.Module):
         seed: int,
     ) -> None:
         cuts_plus_dir = os.path.join(
-            os.getcwd(), 'cuts_plus', 'checkpoints', data
+            os.getcwd(), 'exp', 'checkpoints', data
         )
+        # if not os.path.exists(cuts_plus_dir):
+        #     cuts_plus_dir = os.path.join(
+        #         os.getcwd(), 'cuts_plus', 'checkpoints', data
+        #     )
 
         if subdata is not None:
             cuts_plus_dir = os.path.join(cuts_plus_dir, subdata)
@@ -539,7 +543,7 @@ class PretextDataset(object):
 
             for i in range(len(anchors)):
                 anchor = self.anchors[i]
-                negative_pair = self.negative_pairs[i]
+                negative_pair = negative_pairs[i]
                 amplitude_list = []
                 amplitude_pert_list = []
 

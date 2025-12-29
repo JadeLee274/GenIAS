@@ -3,6 +3,7 @@ import polars as pl
 from genias.utils.common_import import *
 from genias.utils.preprocess import *
 from genias.models.vae import VAE
+from exp.utils.preprocess import downsample_data
 
 
 ############################# Dataset for GenIAS #############################
@@ -65,6 +66,8 @@ class PretextDataset(object):
         mix_step: Optional[int] = None,
         num_pairs: int = 3,
         cut_negative_pairs: bool = True,
+        downsample: bool = False,
+        downsample_step: int = 5,
     ) -> None:
         self.dataset = dataset
         self.timestamp = timestamp
@@ -88,6 +91,17 @@ class PretextDataset(object):
             data = np.load(data_dir)
             self.a = data
             self.data_dim = data.shape[-1]
+        
+        elif dataset == 'SWaT':
+            data_dir = os.path.join(
+                'genias', 'data', 'dataset', dataset, 'swat_train2.csv'
+            )
+            data = pd.read_csv(data_dir)
+            data = data.iloc[:, :-1].to_numpy()
+            self.data_dim = data.shape[-1]
+        
+        if downsample:
+            data = downsample_data(data=data, downsample_step=downsample_step)
 
         self.mean, self.std = get_mean_std(data)
         self.std = np.where(self.std == 0.0, 1.0, self.std)
@@ -238,12 +252,12 @@ class PretextDataset(object):
         else:
             self._negative_pairs = self.negative_pairs
 
-        # np.save(
-        #     file=os.path.join(
-        #         negative_dir, f'negative_pairs_{self.timestamp}.npy'
-        #     ),
-        #     arr=self._negative_pairs,
-        # )
+        np.save(
+            file=os.path.join(
+                negative_dir, f'negative_pairs_{self.timestamp}.npy'
+            ),
+            arr=self._negative_pairs,
+        )
 
         return
     
@@ -266,6 +280,8 @@ class ClassificationDataset(object):
         timestamp: str,
         subdata: Optional[str] = None,
         window_size: int = 10,
+        downsample: bool = False,
+        downsample_step: int = 5,
         mode: str = 'train',
         scheme: str = 'carla',
         num_pairs: int = 3,
@@ -296,22 +312,28 @@ class ClassificationDataset(object):
         
         elif dataset == 'SWaT':
             train_data = pd.read_csv(
-                os.path.join(data_dir, 'SWaT_Normal.csv')
+                os.path.join(data_dir, 'swat_train2..csv')
             )
-            train_data.drop(
-                columns=[' Timestamp', 'Normal/Attack'],
-                inplace=True,
-            )
-            self.train_data = train_data.values[:, 1:]
+            self.train_data = train_data.iloc[:, :-1].to_numpy()
 
-            test_data = pd.read_csv(
-                os.path.join(data_dir, 'SWaT_Abormal.csv')
+            test_data = pd.read_csv(os.path.join(data_dir, 'swat2.csv'))
+            test_labels = test_data.iloc[:, -1] == 1
+            self.test_labels = test_labels.to_numpy().astype(int)
+            self.test_data = test_data.iloc[:, :-1].to_numpy()
+        
+        if downsample:
+            self.train_data = downsample_data(
+                data=self.train_data,
+                downsample_step=downsample_step,
             )
-            test_data.drop(columns=[' Timestamp'], inplace=True)
-            test_data = test_data.values
-            labels = test_data[:, -1]
-            self.test_data = test_data[:, :-1]
-            self.test_labels = np.where(labels == 'Normal', 0, 1)
+            self.test_data = downsample_data(
+                data=self.test_data,
+                downsample_step=downsample_step,
+            )
+            self.train_labels = downsample_data(
+                data=self.train_labels,
+                downsample_step=downsample_step,
+            )
         
         self.data_dim = self.train_data.shape[-1]
         self.mean, self.std = get_mean_std(x=self.train_data)
