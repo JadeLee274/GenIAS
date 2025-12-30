@@ -288,6 +288,8 @@ class PerturbationDataset(object):
         
         self.scaler = StandardScaler()
         self.scaler.fit(train_data)
+        train_data = self.scaler.transform(train_data)
+        test_data = self.scaler.transform(test_data)
 
         self.train_data = convert_to_windows(
             data=train_data,
@@ -326,12 +328,10 @@ class PerturbationDataset(object):
     def __getitem__(self, idx: int) -> Matrix:
         if self.mode == 'train':
             window = self.train_data[idx]
-            window = self.scaler.transform(window)
             return window
         
         elif self.mode == 'test':
             window = self.test_data[idx]
-            window = self.scaler.transform(window)
             return window
         
 
@@ -478,33 +478,27 @@ class PretextDataset(object):
             negative_pairs = negative_pairs.detach().cpu().numpy()
             negative_pairs_temp = np.empty_like(negative_pairs)
 
-            for i in range(len(anchors)):
-                anchor = self.anchors[i]
-                negative_pair = negative_pairs[i]
-                amplitude_list = []
-                amplitude_pert_list = []
-
-                for dim in range(data_dim):
-                    x_d = anchor[..., dim]
-                    x_pert_d = negative_pair[..., dim]
-                    
-                    amplitude_d = np.max(x_d) - np.min(x_d)
-                    amplitude_pert_d = np.max(x_pert_d) - np.min(x_pert_d)
-
-                    amplitude_list.append(amplitude_d)
-                    amplitude_pert_list.append(amplitude_pert_d)
-                
-                negative_pairs_temp[i] = patch(
-                    x=anchor,
-                    x_pert=negative_pair,
-                    amplitude_list=amplitude_list,
-                    amplitude_pert_list=amplitude_pert_list,
-                    deviation_mode=deviation_mode,
-                    non_constant_dim_tau=non_constant_dim_tau,
-                    constant_dim_tau=constant_dim_tau,
+            # Batchwise processing for patching
+            negative_pairs_without_patch = negative_pairs.clone()
+            amplitude_d = torch.max(anchors, axis=1)[0] - \
+                torch.min(anchors, axis=1)[0] # (B, F)
+            amplitude_pert_d = torch.max(negative_pairs, axis=1)[0] - \
+                torch.min(negative_pairs, axis=1)[0] # (B, F)
+            if deviation_mode == 'abs':
+                deviation = torch.abs(anchors - negative_pairs) # (B, T, F)
+            elif deviation_mode == 'square':
+                deviation = (anchors - negative_pairs) ** 2 # (B, T, F)
+            else:
+                raise ValueError("Deviation mode should be 'abs' or 'square'")
+            threshold = torch.where(
+                amplitude_d != 0,
+                non_constant_dim_tau * amplitude_d,
+                constant_dim_tau * amplitude_pert_d
+                ) # (B, F)
+            threshold = threshold[:, None, :].expand(-1, window_size, -1) # (B, T, F)
+            negative_pairs = torch.where(
+                deviation > threshold, negative_pairs, anchors
                 )
-            
-            negative_pairs = negative_pairs_temp
             
             negative_loader = DataLoader(
                 dataset=negative_pairs,
@@ -521,50 +515,38 @@ class PretextDataset(object):
                 causality_matrix=causality_matrix,
             ).detach().cpu().numpy()
         
-            negative_pairs = positive_augmentor.forward(
+            self.negative_pairs = positive_augmentor.forward(
                 x=negative_pairs,
                 causality_matrix=causality_matrix,
             ).detach().cpu().numpy()
 
-            self.negative_pairs = negative_pairs
-            negative_pairs_with_patch = negative_pairs
+            negative_pairs_with_patch = self.negative_pairs
 
         elif (apply_patch and patch_after == 'positive_augmentor'):
             negative_pairs = positive_augmentor.forward(
                 x=negative_pairs,
                 causality_matrix=causality_matrix,
             ).detach().cpu().numpy()
-            negative_pairs_without_patch = negative_pairs
-            negative_pairs_temp = np.empty_like(negative_pairs)
 
-            for i in range(len(anchors)):
-                anchor = self.anchors[i]
-                negative_pair = self.negative_pairs[i]
-                amplitude_list = []
-                amplitude_pert_list = []
-
-                for dim in range(data_dim):
-                    x_d = anchor[..., dim]
-                    x_pert_d = negative_pair[..., dim]
-                    
-                    amplitude_d = np.max(x_d) - np.min(x_d)
-                    amplitude_pert_d = np.max(x_pert_d) - np.min(x_pert_d)
-
-                    amplitude_list.append(amplitude_d)
-                    amplitude_pert_list.append(amplitude_pert_d)
-                
-                negative_pairs_temp[i] = patch(
-                    x=anchor,
-                    x_pert=negative_pair,
-                    amplitude_list=amplitude_list,
-                    amplitude_pert_list=amplitude_pert_list,
-                    deviation_mode=deviation_mode,
-                    non_constant_dim_tau=non_constant_dim_tau,
-                    constant_dim_tau=constant_dim_tau,
+            # Batchwise processing for patching
+            amplitude_pert_d = torch.max(negative_pairs, axis=1)[0] - \
+                torch.min(negative_pairs, axis=1)[0] # (B, F)
+            if deviation_mode == 'abs':
+                deviation = torch.abs(anchors - negative_pairs) # (B, T, F)
+            elif deviation_mode == 'square':
+                deviation = (anchors - negative_pairs) ** 2 # (B, T, F)
+            else:
+                raise ValueError("Deviation mode should be 'abs' or 'square'")
+            threshold = torch.where(
+                amplitude_d != 0,
+                non_constant_dim_tau * amplitude_d,
+                constant_dim_tau * amplitude_pert_d
+                ) # (B, F)
+            threshold = threshold[:, None, :].expand(-1, window_size, -1) # (B, T, F)
+            self.negative_pairs = torch.where(
+                deviation > threshold, negative_pairs, anchors
                 )
-            
-            self.negative_pairs = negative_pairs_temp
-            negative_pairs_with_patch = negative_pairs_temp
+            negative_pairs_with_patch = self.negative_pairs
         
         else:
             self.negative_pairs = positive_augmentor.forward(
