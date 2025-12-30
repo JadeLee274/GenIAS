@@ -20,6 +20,7 @@ checkpoints/
 classification_dataset/
 data/
 log/
+plad_base_code/
 plots/
 practice/
 __pycache__/

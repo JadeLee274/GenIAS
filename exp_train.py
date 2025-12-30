@@ -426,7 +426,8 @@ if __name__ == '__main__':
     assert config.data in ['MSL', 'SMAP', 'SMD', 'SWaT', 'WADI'], \
     "'MSL', 'SMAP', 'SMD', 'SWaT', 'WADI'"
 
-    assert config.perturbator_mode in ['plad', 'tcn_perturbator']
+    if config.perturbator_mode is not None:
+        assert config.perturbator_mode in ['plad', 'tcn_perturbator']
 
     if config.task == 'cuts_plus':
         batch_size = 100
@@ -467,23 +468,102 @@ if __name__ == '__main__':
         )
 
     if config.data in ['MSL', 'SMAP', 'SMD']:
-        data_dir = os.path.join('exp', 'data', config.data, 'train')
-        data_list = sorted(os.listdir(data_dir))
-        data_list = [subdata.replace('.npy', '') for subdata in data_list]
+        if config.subdata is None:
+            data_dir = os.path.join('exp', 'data', config.data, 'train')
+            data_list = sorted(os.listdir(data_dir))
+            data_list = [subdata.replace('.npy', '') for subdata in data_list]
 
-        f1_list = []
-        tp_list = []
-        fp_list = []
-        fn_list = []
-        aucpr_list = []
-        
-        if config.task == 'pretext_classification':
-            for subdata in data_list:
+            f1_list = []
+            tp_list = []
+            fp_list = []
+            fn_list = []
+            aucpr_list = []
+            
+            if config.task == 'pretext_classification':
+                for subdata in data_list:
+                    f1, tp, fp, fn, aucpr = main(
+                        time=time,
+                        task=config.task,
+                        data=config.data,
+                        subdata=subdata,
+                        window_size=config.window_size,
+                        batch_size=batch_size,
+                        gpu_num=config.gpu_num,
+                        epochs=config.epochs,
+                        perturbator_mode=config.perturbator_mode,
+                        positive_augmentor_time=config.positive_augmentor_time,
+                        perturbator_time=config.perturbator_time,
+                        downsample=config.downsample,
+                        downsample_step=config.downsample_step,
+                        seed=config.seed,
+                        apply_patch=config.apply_patch,
+                        patch_after=config.patch_after,
+                        deviation_mode=config.deviation_mode,
+                        non_constant_dim_tau=config.non_constant_dim_tau,
+                        constant_dim_tau=config.constant_dim_tau,
+                    )
+                    f1_list.append(f1)
+                    tp_list.append(tp)
+                    fp_list.append(fp)
+                    fn_list.append(fn)
+                    aucpr_list.append(aucpr)
+                
+                f1_list = np.array(f1_list)
+                tp_list = np.array(tp_list)
+                fp_list = np.array(fp_list)
+                fn_list = np.array(f1_list)
+                aucpr_list = np.array(aucpr_list)
+
+                best_f1 = np.max(f1_list)
+                precision, recall, f1_micro = mirco_f1(
+                    tp_list=tp_list,
+                    fp_list=fp_list,
+                    fn_list=fn_list,
+                )
+                aucpr_mean = np.mean(aucpr_list)
+                aucpr_std = np.std(aucpr_list)
+                f1_macro = macro_f1(f1_list=f1_list)
+
+                logging.info('Scores')
+                logging.info(f'- Best F1: {round(best_f1, 4)}')
+                logging.info(f'- Micro F1: {round(f1_micro, 4)}')
+                logging.info(f'- Precision: {round(precision, 4)}')
+                logging.info(f'- Recall: {round(recall, 4)}')
+                logging.info(f'- AUC-PR mean: {round(aucpr_mean, 4)}')
+                logging.info(f'- AUC-PR std: {round(aucpr_std, 4)}')
+                logging.info(f'- Macro F1: {round(f1_macro, 4)}')
+    
+            else:
+                for subdata in data_list:
+                    main(
+                        time=time,
+                        task=config.task,
+                        data=config.data,
+                        subdata=subdata,
+                        window_size=config.window_size,
+                        batch_size=batch_size,
+                        gpu_num=config.gpu_num,
+                        epochs=config.epochs,
+                        perturbator_mode=config.perturbator_mode,
+                        positive_augmentor_time=config.positive_augmentor_time,
+                        perturbator_time=config.perturbator_time,
+                        downsample=config.downsample,
+                        downsample_step=config.downsample_step,
+                        seed=config.seed,
+                        apply_patch=config.apply_patch,
+                        patch_after=config.patch_after,
+                        deviation_mode=config.deviation_mode,
+                        non_constant_dim_tau=config.non_constant_dim_tau,
+                        constant_dim_tau=config.constant_dim_tau,
+                    )
+
+        else:
+            if config.task == 'pretext_classification':
                 f1, tp, fp, fn, aucpr = main(
                     time=time,
                     task=config.task,
                     data=config.data,
-                    subdata=subdata,
+                    subdata=config.subdata,
                     window_size=config.window_size,
                     batch_size=batch_size,
                     gpu_num=config.gpu_num,
@@ -500,44 +580,24 @@ if __name__ == '__main__':
                     non_constant_dim_tau=config.non_constant_dim_tau,
                     constant_dim_tau=config.constant_dim_tau,
                 )
-                f1_list.append(f1)
-                tp_list.append(tp)
-                fp_list.append(fp)
-                fn_list.append(fn)
-                aucpr_list.append(aucpr)
-            
-            f1_list = np.array(f1_list)
-            tp_list = np.array(tp_list)
-            fp_list = np.array(fp_list)
-            fn_list = np.array(f1_list)
-            aucpr_list = np.array(aucpr_list)
+                precision = tp / (tp + fp)
+                recall = tp / (tp / fn)
 
-            best_f1 = np.max(f1_list)
-            precision, recall, f1_micro = mirco_f1(
-                tp_list=tp_list,
-                fp_list=fp_list,
-                fn_list=fn_list,
-            )
-            aucpr_mean = np.mean(aucpr_list)
-            aucpr_std = np.std(aucpr_list)
-            f1_macro = macro_f1(f1_list=f1_list)
+                logging.info('Scores:')
+                logging.info(f'- F1: {round(f1, 4)}')
+                logging.info(f'- Precision: {round(precision, 4)}')
+                logging.info(f'- Recall: {round(recall, 4)}')
+                logging.info(f'- AUC-PR: {round(aucpr, 4)}')
+                logging.info(f'- True positives: {round(tp, 4)}')
+                logging.info(f'- False positives: {round(fp, 4)}')
+                logging.info(f'- False negatives: {round(fn, 4)}')
 
-            logging.info('Scores')
-            logging.info(f'- Best F1: {round(best_f1, 4)}')
-            logging.info(f'- Micro F1: {round(f1_micro, 4)}')
-            logging.info(f'- Precision: {round(precision, 4)}')
-            logging.info(f'- Recall: {round(recall, 4)}')
-            logging.info(f'- AUC-PR mean: {round(aucpr_mean, 4)}')
-            logging.info(f'- AUC-PR std: {round(aucpr_std, 4)}')
-            logging.info(f'- Macro F1: {round(f1_macro, 4)}')
-    
-        else:
-            for subdata in data_list:
+            else:
                 main(
                     time=time,
                     task=config.task,
                     data=config.data,
-                    subdata=subdata,
+                    subdata=config.subdata,
                     window_size=config.window_size,
                     batch_size=batch_size,
                     gpu_num=config.gpu_num,
@@ -554,7 +614,7 @@ if __name__ == '__main__':
                     non_constant_dim_tau=config.non_constant_dim_tau,
                     constant_dim_tau=config.constant_dim_tau,
                 )
-    
+            
     elif config.data in ['SWaT', 'WADI']:
         if config.task == 'pretext_classification':
             f1, tp, fp, fn, aucpr = main(

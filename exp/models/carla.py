@@ -58,48 +58,19 @@ class ConvBlock(nn.Module):
         out_channels: int,
         kernel_size: int,
         stride: int,
-        norm: str,
     ) -> None:
         super().__init__()
-        assert norm in ['batch', 'instance', 'weight'], \
-        "'batch', 'instance', 'weight'"
-
         # Convolution kernel is applied to time axis.      
-        if norm == 'batch':
-            self.layers = nn.Sequential(
-                Conv1dSamePadding(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=kernel_size,
-                    stride=stride,
-                ),
-                nn.BatchNorm1d(num_features=out_channels),
-                nn.ReLU(),
-            )
-        elif norm == 'instance':
-            self.layers = nn.Sequential(
-                Conv1dSamePadding(
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    kernel_size=kernel_size,
-                    stride=stride,
-                ),
-                nn.InstanceNorm1d(num_features=out_channels),
-                nn.ReLU(),
-            )
-        elif norm == 'weight':
-            self.layers = nn.Sequential(
-                weight_norm(
-                    Conv1dSamePadding(
-                        in_channels=in_channels,
-                        out_channels=out_channels,
-                        kernel_size=kernel_size,
-                        stride=stride,
-                    )
-                ),
-                nn.ReLU(),
-            )
-        
+        self.layers = nn.Sequential(
+            Conv1dSamePadding(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+            ),
+            nn.BatchNorm1d(num_features=out_channels),
+            nn.ReLU(),
+        )
         return
     
     def forward(self, x: Tensor) -> Tensor:
@@ -111,7 +82,6 @@ class ResidualBlock(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        norm: str,
         kernel_size_list: List[int] = [8, 5, 3]
     ) -> None:
         super().__init__()
@@ -127,7 +97,6 @@ class ResidualBlock(nn.Module):
                     out_channels=channels[i+1],
                     kernel_size=kernel_size_list[i],
                     stride=1,
-                    norm=norm,
                 )
             )
         
@@ -137,35 +106,15 @@ class ResidualBlock(nn.Module):
 
         if in_channels != out_channels:
             self.match_channels = True
-            if norm == 'batch':
-                self.residual_layer = nn.Sequential(      
-                    Conv1dSamePadding(
-                        in_channels=in_channels,
-                        out_channels=out_channels,
-                        kernel_size=1,
-                        stride=1,
-                    ),
-                    nn.BatchNorm1d(num_features=out_channels),
-                )
-            elif norm == 'instance':
-                self.residual_layer = nn.Sequential(      
-                    Conv1dSamePadding(
-                        in_channels=in_channels,
-                        out_channels=out_channels,
-                        kernel_size=1,
-                        stride=1,
-                    ),
-                    nn.InstanceNorm1d(num_features=out_channels),
-                )
-            elif norm == 'weight':
-                self.residual_layer = weight_norm(
-                    Conv1dSamePadding(
-                        in_channels=in_channels,
-                        out_channels=out_channels,
-                        kernel_size=3,
-                        stride=1,
-                    )
-                )
+            self.residual_layer = nn.Sequential(      
+                Conv1dSamePadding(
+                    in_channels=in_channels,
+                    out_channels=out_channels,
+                    kernel_size=1,
+                    stride=1,
+                ),
+                nn.BatchNorm1d(num_features=out_channels),
+            )
     
     def forward(self, x: Tensor) -> Tensor:
         if self.match_channels:

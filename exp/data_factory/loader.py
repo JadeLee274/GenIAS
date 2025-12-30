@@ -361,8 +361,8 @@ class PretextDataset(object):
         save_negative_pairs: bool,
         plot_perturbation: bool,
     ) -> None:
-        assert perturbator_mode in ['plad', 'tcnperturbator'], \
-        "perturbator_mode has to be either 'plad' or 'tcnperturbator'"
+        assert perturbator_mode in ['plad', 'tcn_perturbator'], \
+        "perturbator_mode has to be either 'plad' or 'tcn_perturbator'"
 
         data_path = os.path.join('exp', 'data', data)
 
