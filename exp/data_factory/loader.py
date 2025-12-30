@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from exp.utils.common_import import *
 from exp.models.cuts_plus import CUTS_Plus_Net
-from exp.models.augmentor import TCNPerturbator
+from exp.models.augmentor import *
 from exp.utils.preprocess import *
 
 
@@ -347,6 +347,7 @@ class PretextDataset(object):
         subdata: Optional[str],
         window_size: int,
         seed: int,
+        perturbator_mode: str,
         positive_augmentor_time: str,
         perturbator_time: str,
         processor_num: int,
@@ -360,6 +361,9 @@ class PretextDataset(object):
         save_negative_pairs: bool,
         plot_perturbation: bool,
     ) -> None:
+        assert perturbator_mode in ['plad', 'tcnperturbator'], \
+        "perturbator_mode has to be either 'plad' or 'tcnperturbator'"
+
         data_path = os.path.join('exp', 'data', data)
 
         if data in ['MSL', 'SMAP', 'SMD']:
@@ -436,16 +440,31 @@ class PretextDataset(object):
         positive_augmentor.eval()
         
         # Initialize negative augmentor(perturbator).
-        perturbator = TCNPerturbator(
-            window_size=window_size,
-            data_dim=data_dim,
-            latent_perturbator_factor=2.0,
-        )
-        perturbator.init_perturbator(
-            time=perturbator_time,
-            data=data,
-            subdata=subdata,
-        )
+        if perturbator_mode == 'plad':
+            latent_dim = 100 if data_dim > 1 else 50
+            perturbator = PLAD(
+                window_size=window_size,
+                data_dim=data_dim,
+                latent_dim=latent_dim,
+            )
+            perturbator.init_plad(
+                time=perturbator_time,
+                data=data,
+                subdata=subdata,
+                epoch=50,
+            )
+        
+        elif perturbator_mode == 'tcnperturbator':
+            perturbator = TCNPerturbator(
+                window_size=window_size,
+                data_dim=data_dim,
+                latent_perturbator_factor=2.0,
+            )
+            perturbator.init_perturbator(
+                time=perturbator_time,
+                data=data,
+                subdata=subdata,
+            )
 
         assert perturbator.seed == seed, \
         f"perturbator seed {perturbator.seed} and current seed {seed} mismatch"
@@ -471,7 +490,11 @@ class PretextDataset(object):
         ).detach().cpu().numpy()
 
         # Negative pairs are also normalized.
-        _, negative_pairs, _, _ = perturbator.forward(x=anchors)
+        if perturbator_mode == 'plad':
+            negative_pairs, _ = perturbator.forward(x=anchors)
+        
+        elif perturbator_mode == 'tcn_perturbator':
+            _, negative_pairs, _, _ = perturbator.forward(x=anchors)
 
         if apply_patch:
             assert patch_after in ['perturbator', 'positive_augmentor'], \

@@ -409,6 +409,188 @@ class CUTSplusTrainer(object):
         return
 
 
+class PLADTrainer(object):
+    def __init__(
+        self,
+        time: str,
+        data: str,
+        subdata: Optional[str],
+        downsample: bool,
+        downsample_step: int,
+        batch_size: int,
+        window_size: int,
+        optim_learning_rate: float = 1e-5,
+        optim_weight_decay: float = 1e-3,
+        gpu_num: int = 0,
+        epochs: int = 50,
+        save_interval: int = 5,
+        seed: int = 42,
+    ) -> None:
+        self.time = time
+        self.data = data
+        self.subdata = subdata
+        self.downsample = downsample
+        self.downsample_step = downsample_step
+        self.batch_size = batch_size
+        self.window_size = window_size
+        self.optim_learning_rate = optim_learning_rate
+        self.optim_weight_decay = optim_weight_decay
+        self.epochs = epochs
+        self.save_interval = save_interval
+        self.seed = seed
+
+        self.train_dataset = PerturbationDataset(
+            data=data,
+            subdata=subdata,
+            mode='train',
+            window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
+        )
+        self.train_loader = DataLoader(
+            dataset=self.train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+        )
+        self.test_dataset = PerturbationDataset(
+            data=data,
+            subdata=subdata,
+            mode='test',
+            window_size=window_size,
+            downsample=downsample,
+            downsample_step=downsample_step,
+        )
+        self.device = torch.device(f'cuda:{gpu_num}')
+
+        data_dim = self.train_dataset.data_dim
+        self.data_dim = data_dim
+        latent_dim = 100 if data_dim > 1 else 50
+        self.plad = PLAD(
+            window_size=window_size,
+            data_dim=data_dim,
+            latent_dim=latent_dim,
+        ).to(self.device)
+        self.discriminator = Discriminator(data_dim=data_dim).to(self.device)
+
+        self.optimizer = Adam(
+            params=list(self.plad.parameters()) \
+                   + list(self.discriminator.parameters()),
+            lr=optim_learning_rate,
+            weight_decay=optim_weight_decay,
+        )
+
+        self.plad_loss = PLADLoss(window_size=window_size, data_dim=data_dim)
+        self.discriminator_loss = DiscriminatorLoss()
+
+        # Make dirs
+        self.ckpt_dir = os.path.join('exp', 'checkpoints', data)
+        self.log_dir = os.path.join('exp' 'plad', data)
+
+        if subdata is not None:
+            self.ckpt_dir = os.path.join(self.ckpt_dir, subdata)
+        
+        self.ckpt_dir = os.path.join(self.ckpt_dir, 'perturbator', time)
+        self.log_dir = os.path.join(self.log_dir, time)
+
+        os.makedirs(self.ckpt_dir, exist_ok=True)
+        os.makedirs(self.log_dir, exist_ok=True)
+
+        return
+
+    def save_model(self, epoch: int) -> None:
+        torch.save(
+            obj={
+                'epoch': epoch,
+                'perturbator': self.plad.state_dict(),
+                'discriminator': self.discriminator.state_dict(),
+                'optimzier': self.optimizer.state_dict(),
+                'epoch': epoch,
+                'window_size': self.window_size,
+                'data_dim': self.data_dim,
+                'seed': self.seed,
+            },
+            f=os.path.join(self.ckpt_dir, f'epoch_{epoch}.pt'),
+        )
+        return
+    
+    def train(self) -> None:
+        self.plad.train()
+        self.discriminator.train()
+
+        for epoch in range(self.epochs):
+            epoch_total_loss = 0.0
+            epoch_mse_loss = 0.0
+            epoch_negative_bce = 0.0
+            epoch_positive_bce = 0.0
+
+            for x in self.train_loader:
+                self.optimizer.zero_grad()
+
+                x: Tensor = x.to(self.device)
+                x_pert, perturbations = self.plad.forward(x)
+                negative_label = self.discriminator.forward(x)
+                positive_label = self.discriminator.forward(x_pert)
+
+                plad_loss, mse_loss = self.plad_loss(perturbations)
+                total_bce, negative_bce, positive_bce \
+                = self.discriminator_loss(
+                    positive_pseudo_label=positive_label,
+                    negative_pseudo_label=negative_label,
+                )
+
+                total_loss = plad_loss + total_bce
+                total_loss.backward()
+                self.optimizer.step()
+
+                epoch_total_loss += total_loss.item()
+                epoch_mse_loss += mse_loss
+                epoch_negative_bce += negative_bce
+                epoch_positive_bce += positive_bce
+            
+            epoch_total_loss /= len(self.train_loader)
+            epoch_mse_loss /= len(self.train_loader)
+            epoch_negative_bce /= len(self.train_loader)
+            epoch_positive_bce /= len(self.train_loader)
+
+            logging.info(f'Epoch {epoch + 1} loss:')
+            logging.info(f'- Total loss: {epoch_total_loss:.4e}')
+            logging.info(f'- MSE loss: {epoch_mse_loss:.4e}')
+            logging.info(f'- Negative BCE: {epoch_negative_bce:.4e}')
+            logging.info(f'- Positive BCE: {epoch_positive_bce:.4e}\n')
+
+            if epoch == 0 or (epoch + 1) % self.save_interval == 0:
+                self.save_model(epoch=epoch+1)
+
+        return
+    
+    def eval(self) -> None:
+        self.discriminator.eval()
+        pred_list = []
+
+        for idx in range(len(self.test_dataset)):
+            x = self.test_dataset[idx]
+            x = torch.tensor(x).float().unsqueeze(0).to(self.device)
+            pred = self.discriminator.forward(x)
+            pred = (pred > 0.5).int().item()
+            pred_list.append(pred)
+        
+        pred_list = np.array(pred_list, dtype=np.int32)
+
+        f1 = f1_score(
+            y_true=self.test_dataset.test_labels,
+            y_pred=pred_list,
+        )
+
+        if self.data in ['MSL', 'SMAP', 'SMD']:
+            logging.info(
+                f'F1 score on {self.data} {self.subdata}: {round(f1, 4)}\n'
+            )
+        else:
+            logging.info(f'F1 socre on {self.data}: {round(f1, 4)}\n')
+        
+        return
+
+
 class TCNPerturbatorTrainer(object):
     def __init__(
         self,
@@ -720,6 +902,7 @@ class PretextTrainer(object):
         subdata: Optional[str],
         seed: int,
         window_size: int,
+        perturbator_mode: str,
         positive_augementor_time: str,
         perturbator_time: str,
         downsample: bool,
@@ -735,6 +918,9 @@ class PretextTrainer(object):
         non_constant_dim_tau: float,
         constant_dim_tau: float,
     ) -> None:
+        assert perturbator_mode in ['plad', 'tcn_perturbator'] ,\
+        "perturbator_mode has to be either 'plad' or 'tcn_perturbator'"
+    
         if subdata is not None:
             logging.info(f'Pretext training on {data} {subdata} start...\n')
         else:
@@ -748,6 +934,7 @@ class PretextTrainer(object):
             subdata=subdata,
             window_size=window_size,
             seed=seed,
+            perturbator_mode=perturbator_mode,
             positive_augmentor_time=positive_augementor_time,
             perturbator_time=perturbator_time,
             processor_num=gpu_num,

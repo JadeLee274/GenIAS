@@ -6,11 +6,11 @@ def main(
     task: str,
     data: str,
     subdata: Optional[str],
-    retrain: bool,
-    restart_epoch: int,
     window_size: int,
     batch_size: int,
     gpu_num: int,
+    epochs: int,
+    perturbator_mode: str,
     positive_augmentor_time: Optional[str],
     perturbator_time: Optional[str],
     downsample: bool,
@@ -24,6 +24,7 @@ def main(
 ) -> None:
     assert task in [
         'cuts_plus',
+        'plad',
         'perturbation',
         'pretext_classification',
         'all'
@@ -69,6 +70,44 @@ def main(
         trainer.train()
 
         return
+    
+    elif task == 'plad':
+        if data in  ['MSL', 'SMAP', 'SMD']:
+            logging.info(
+                f'Training perturbator model on {data} {subdata}...\n'
+            )
+        elif data in ['SWaT', 'WADI']:
+            logging.info(f'Training perturbator model in {data}...\n')
+        
+        trainer = PLADTrainer(
+            time=time,
+            data=data,
+            subdata=subdata,
+            downsample=downsample,
+            downsample_step=downsample_step,
+            batch_size=batch_size,
+            window_size=window_size,
+            epochs=epochs,
+            seed=seed,
+        )
+        if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
+            logging.info('Experiment setup:')
+            logging.info(f'- Batch size: {trainer.batch_size}')
+            logging.info(f'- Window size: {trainer.window_size}')
+            logging.info(f'- Downsample: {trainer.downsample}')
+
+            if downsample:
+                logging.info(f'- Downsample step: {trainer.downsample_step}')
+
+            logging.info(f'- Learning rate: {trainer.optim_learning_rate}')
+            logging.info(f'- Weight decay: {trainer.optim_weight_decay}')
+            logging.info(f'- Train epochs: {trainer.epochs}')
+            logging.info(f'- Seed: {trainer.seed}\n')
+        
+        trainer.train()
+        trainer.eval()
+
+        return
         
     elif task == 'perturbation':
         if data in  ['MSL', 'SMAP', 'SMD']:
@@ -87,6 +126,7 @@ def main(
             downsample=downsample,
             downsample_step=downsample_step,
             seed=seed,
+            epochs=epochs,
         )
         
         if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
@@ -155,6 +195,7 @@ def main(
             subdata=subdata,
             seed=seed,
             window_size=window_size,
+            perturbator_mode=perturbator_mode,
             positive_augementor_time=positive_augmentor_time,
             perturbator_time=perturbator_time,
             downsample=downsample,
@@ -289,6 +330,13 @@ if __name__ == '__main__':
         help="Name of dataset.",
     )
     args.add_argument(
+        '--subdata',
+        type=str,
+        help="Name of subdata. Only for MSL, SMAP, SMD when you want to run " \
+             "this script on specific subdata. If it is None, then this script" \
+             "runs on the entire subset."
+    )
+    args.add_argument(
         '--window-size',
         type=int,
         default=10,
@@ -301,9 +349,20 @@ if __name__ == '__main__':
         help="GPU number. Default 0."
     )
     args.add_argument(
+        '--epochs',
+        type=int,
+        help="Train epochs."
+    )
+    args.add_argument(
         '--seed',
         type=int,
-        help='Seed.'
+        default=42,
+        help='Seed. Default 42.'
+    )
+    args.add_argument(
+        '--perturbator-mode',
+        type=str,
+        help="The mode of perturbator. Either 'plad' or 'tcn_perturbator'",
     )
     args.add_argument(
         '--positive-augmentor-time',
@@ -359,9 +418,15 @@ if __name__ == '__main__':
 
     assert config.task in [
         'cuts_plus',
+        'plad',
         'perturbation',
         'pretext_classification',
-    ], "task is one of 'cuts_plus', 'perturbation', 'pretext_classification'."
+    ], "'plad', 'cuts_plus', 'perturbation', 'pretext_classification'"
+
+    assert config.data in ['MSL', 'SMAP', 'SMD', 'SWaT', 'WADI'], \
+    "'MSL', 'SMAP', 'SMD', 'SWaT', 'WADI'"
+
+    assert config.perturbator_mode in ['plad', 'tcn_perturbator']
 
     if config.task == 'cuts_plus':
         batch_size = 100
@@ -377,8 +442,7 @@ if __name__ == '__main__':
             assert config.constant_dim_tau is not None, \
                    "tau for constant-valued dimension needed."
     
-    if config.seed is not None:
-        fix_seed_all(seed=config.seed)
+    fix_seed_all(seed=config.seed)
     
     time = datetime.datetime.now()
     time = time.strftime('%m%d_%H%M')
@@ -423,6 +487,8 @@ if __name__ == '__main__':
                     window_size=config.window_size,
                     batch_size=batch_size,
                     gpu_num=config.gpu_num,
+                    epochs=config.epochs,
+                    perturbator_mode=config.perturbator_mode,
                     positive_augmentor_time=config.positive_augmentor_time,
                     perturbator_time=config.perturbator_time,
                     downsample=config.downsample,
@@ -475,6 +541,8 @@ if __name__ == '__main__':
                     window_size=config.window_size,
                     batch_size=batch_size,
                     gpu_num=config.gpu_num,
+                    epochs=config.epochs,
+                    perturbator_mode=config.perturbator_mode,
                     positive_augmentor_time=config.positive_augmentor_time,
                     perturbator_time=config.perturbator_time,
                     downsample=config.downsample,
@@ -497,6 +565,8 @@ if __name__ == '__main__':
                 window_size=config.window_size,
                 batch_size=batch_size,
                 gpu_num=config.gpu_num,
+                epochs=config.epochs,
+                perturbator_mode=config.perturbator_mode,
                 positive_augmentor_time=config.positive_augmentor_time,
                 perturbator_time=config.pertrbator_time,
                 downsample=config.downsample,
@@ -530,6 +600,8 @@ if __name__ == '__main__':
                 window_size=config.window_size,
                 batch_size=batch_size,
                 gpu_num=config.gpu_num,
+                epochs=config.epochs,
+                perturbator_mode=config.perturbator_mode,
                 positive_augmentor_time=config.positive_augmentor_time,
                 perturbator_time=config.perturbator_time,
                 downsample=config.downsample,

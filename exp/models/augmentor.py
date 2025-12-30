@@ -4,6 +4,72 @@ from exp.utils.common_import import *
 from exp.models.tcn import *
     
 
+class PLAD(nn.Module):
+    def __init__(
+        self,
+        window_size: int,
+        data_dim: int,
+        latent_dim: int,
+    ) -> None:
+        super().__init__()
+        self.window_size = window_size
+        self.data_dim = data_dim
+
+        self.encoder = TemporalConvNet(
+            in_channels=data_dim,
+            hidden_channels=[data_dim, latent_dim],
+        )
+        self.decoder = TemporalConvNet(
+            in_channels=latent_dim,
+            hidden_channels=[latent_dim, 2*data_dim],
+        )
+        return
+    
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
+        z = self.encoder.forward(x)
+        perturbations = self.decoder.forward(z)
+        pert_mult = perturbations[..., :self.data_dim]
+        pert_add = perturbations[..., self.data_dim:]
+        x_pert = pert_mult * x + pert_add
+        return x_pert, perturbations
+    
+    def init_plad(
+        self,
+        time: str,
+        data: str,
+        subdata: str,
+        epoch: int,
+    ) -> None:
+        ckpt_dir = os.path.join('exp', 'checkpoints', data)
+
+        if subdata is not None:
+            ckpt_dir = os.path.join(ckpt_dir, subdata)
+        
+        ckpt_dir = os.path.join(
+            ckpt_dir, 'perturbator', time, f'epoch_{epoch}.pt'
+        )
+        ckpt = torch.load(ckpt_dir)
+        self.load_state_dict(ckpt['perturbator'])
+        self.seed = ckpt['seed']
+
+        return
+
+
+class Discriminator(nn.Module):
+    def __init__(self, data_dim: int) -> None:
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(in_features=data_dim, out_features=1),
+            nn.Sigmoid(),
+        )
+        return
+    
+    def forward(self, x: Tensor) -> Tensor:
+        label: Tensor = self.fc.forward(x)
+        label = label.mean(dim=1)
+        return label
+
+
 class TCNPerturbator(nn.Module):
     def __init__(
         self,

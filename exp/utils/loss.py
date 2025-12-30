@@ -5,6 +5,48 @@ from exp.utils.common_import import *
 warnings.filterwarnings('ignore')
 
 
+class PLADLoss:
+    def __init__(
+        self,
+        window_size: int,
+        data_dim: int,
+    ) -> None:
+        ones = torch.ones(window_size, data_dim)
+        zeros = torch.ones(window_size, data_dim)
+        self.e = torch.cat([ones, zeros], dim=1)
+
+        self.mse = nn.MSELoss()
+
+        return
+    
+    def __call__(self, perturbations: Tensor) -> Tuple[Tensor, float]:
+        plad_loss = self.mse.forward(
+            input=perturbations,
+            target=self.e.to(perturbations.device),
+        )
+        return plad_loss, plad_loss.item()
+
+
+class DiscriminatorLoss:
+    def __init__(self) -> None:
+        self.bce = nn.BCELoss()
+        return
+    
+    def __call__(
+        self,
+        positive_pseudo_label: Tensor,
+        negative_pseudo_label: Tensor,
+    ) -> Tuple[Tensor, float, float]:
+        batch_size = positive_pseudo_label.shape[0]
+        negative_label = torch.zeros(batch_size, 1).to(positive_pseudo_label.device)
+        positive_label = torch.ones(batch_size, 1).to(negative_pseudo_label.device)
+        negative_bce = self.bce.forward(negative_pseudo_label, negative_label)
+        positive_bce = self.bce.forward(positive_pseudo_label, positive_label)
+        total_bce = negative_bce + positive_bce
+        return total_bce, negative_bce.item(), positive_bce.item()
+
+
+
 class TCNPerturbatorLoss:
     def __init__(
         self,
@@ -28,10 +70,6 @@ class TCNPerturbatorLoss:
         self.recon_pert_mse_delta_min = recon_pert_mse_delta_min
         self.pert_mse_delta_min = pert_mse_delta_min
         self.prior_var = prior_var
-
-        # Perturbator loss tensors
-        self.ones = torch.ones(window_size, data_dim)
-        self.zeros = torch.zeros(window_size, data_dim)
 
         # Loss weights
         self.recon_loss_weight = recon_loss_weight
