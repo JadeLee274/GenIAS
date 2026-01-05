@@ -12,7 +12,7 @@ class PLADLoss:
         data_dim: int,
     ) -> None:
         ones = torch.ones(window_size, data_dim)
-        zeros = torch.ones(window_size, data_dim)
+        zeros = torch.zeros(window_size, data_dim)
         self.e = torch.cat([ones, zeros], dim=1)
 
         self.mse = nn.MSELoss()
@@ -44,7 +44,28 @@ class DiscriminatorLoss:
         positive_bce = self.bce.forward(positive_pseudo_label, positive_label)
         total_bce = negative_bce + positive_bce
         return total_bce, negative_bce.item(), positive_bce.item()
+    
 
+class DiscriminatorLoss2:
+    """
+    Temporary discriminator loss for SWaT and WADI.
+    """
+    def __init__(self) -> None:
+        self.bce = nn.BCEWithLogitsLoss()
+        return
+    
+    def __call__(
+        self,
+        positive_pseudo_label: Tensor,
+        negative_pseudo_label: Tensor,
+    ) -> Tuple[Tensor, float, float]:
+        batch_size = positive_pseudo_label.shape[0]
+        negative_label = torch.zeros(batch_size, 1).to(positive_pseudo_label.device)
+        positive_label = torch.ones(batch_size, 1).to(positive_pseudo_label.device)
+        negative_bce = self.bce.forward(negative_pseudo_label, negative_label)
+        positive_bce = self.bce.forward(positive_pseudo_label, positive_label)
+        total_bce = negative_bce + positive_bce
+        return total_bce, negative_bce.item(), positive_bce.item()
 
 
 class TCNPerturbatorLoss:
@@ -240,7 +261,61 @@ class PretextLoss:
         )
         loss = torch.mean(loss)
 
-        return loss 
+        return loss
+
+
+class InfoNCELoss:
+    def __init__(
+        self,
+        temperature: float = 0.1,
+        reduction: str = 'mean',
+    ) -> None:
+        self.temperature = temperature
+        self.reduction = reduction
+        return
+    
+    def __call__(
+        self,
+        anchor: Tensor,
+        positive_pair: Tensor,
+        negative_pair_first: Tensor,
+        negative_pair_second: Tensor,
+    ) -> Tensor:
+        assert anchor.ndim == 2, \
+               "anchor shape must be (batch size, representation dim)"
+        assert positive_pair.ndim == 2, \
+               "positive pair shape must be (batch size, representation dim)"
+        assert negative_pair_first.ndim == 2, \
+               "negative pair shape must be (batch size, representation dim)"
+        assert negative_pair_second.ndim == 2, \
+               "negative pair shape must be (batch size, representation dim)"
+        
+        # Normalize anchor, positive pair, negative pairs
+        anchor = F.normalize(anchor, dim=-1)
+        positive_pair = F.normalize(positive_pair, dim=-1)
+        negative_pair_first = F.normalize(negative_pair_first, dim=-1)
+        negative_pair_second = F.normalize(negative_pair_second, dim=-1)
+
+        positive_logit = torch.sum(anchor * positive_pair, dim=1, keepdim=True)
+
+        negative_logit_first \
+        = torch.sum(anchor * negative_pair_first, dim=1, keepdim=True)
+        negative_logit_second \
+        = torch.sum(anchor * negative_pair_second, dim=1, keepdim=True)
+
+        logits = torch.cat(
+            [positive_logit, negative_logit_first, negative_logit_second],
+            dim=1,
+        )
+        labels = torch.zeros(len(logits), dtype=torch.long, device=anchor.device)
+
+        infonce_loss = F.cross_entropy(
+            input=logits/self.temperature,
+            target=labels,
+            reduction=self.reduction,
+        )
+        
+        return infonce_loss
  
 
 class ClassificationLoss:
