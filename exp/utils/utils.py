@@ -248,3 +248,72 @@ def plot_perturbation(
         plt.close()
 
     return
+
+
+def save_inference_results_to_npz(data: str, mode: str, time: str) -> None:
+    assert mode in ['carla', 'exp'], "'carla', 'exp'"
+
+    save_dir = os.path.join('results_npz', data, mode)
+    os.makedirs(save_dir, exist_ok=True)
+
+    f1_list = []
+    aucpr_list = []
+    tp_list = []
+    fp_list = []
+    fn_list = []
+    
+    log_dir = os.path.join(
+        'log', 'pretext_classification', data, mode, f'{time}.log'
+    )
+    
+    with open(log_dir, mode='r', encoding='utf-8') as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if 'Seed' in line:
+                contents = line.split(' ')
+                seed = contents[-1]
+                seed = int(float(seed))
+            elif 'F1' in line:
+                contents = line.split(' ')
+                f1 = contents[-1]
+                f1_list.append(float(f1))
+            elif 'AUC' in line:
+                contents = line.split(' ')
+                aucpr = contents[-1]
+                aucpr_list.append(float(aucpr))
+            elif 'True Positive' in line:
+                contents = line.split(' ')
+                tp = contents[-1]
+                tp_list.append(int(float(tp)))
+            elif 'False Positive' in line:
+                contents = line.split(' ')
+                fp = contents[-1]
+                fp_list.append(int(float(fp)))
+            elif 'False Negative' in line:
+                contents = line.split(' ')
+                fn = contents[-1]
+                fn_list.append(int(float(fn)))
+            elif 'Scores' in line:
+                break
+    
+    f1_list = np.array(f1_list).reshape(len(f1_list), 1)
+    aucpr_list = np.array(aucpr_list).reshape(len(aucpr_list), 1)
+    tp_list = np.array(tp_list).reshape(len(tp_list), 1)
+    fp_list = np.array(fp_list).reshape(len(fp_list), 1)
+    fn_list = np.array(fn_list).reshape(len(fn_list), 1)
+    result_matrix = np.concatenate(
+        [f1_list, aucpr_list, tp_list, fp_list, fn_list],
+        axis=1,
+    )
+
+    np.savez(
+        file=os.path.join(save_dir, f'seed_{seed}_results.npz'),
+        f1=f1_list,
+        aucpr=aucpr_list,
+        tp=tp_list,
+        fp=fp_list,
+        fn=fn_list,
+        results=result_matrix,
+    )
+
+    return

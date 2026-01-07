@@ -6,11 +6,22 @@ def main(
     task: str,
     data: str,
     subdata: Optional[str],
-    window_size: int,
     batch_size: int,
+    window_size: int,
     gpu_num: int,
     epochs: int,
+    save_interval: int,
     perturbator_mode: str,
+    perturbator_epoch: int,
+    discriminator_mode: int,
+    positive_augmentor_noise_more: bool,
+    make_second_negative_pair: bool,
+    causality_distort: str,
+    negative_augmentor_noise_more: bool,
+    negative_augmentor_noise_type: str,
+    mix_negative_pairs: bool,
+    second_negative_pair_ratio: float,
+    use_infonce_loss: bool,
     positive_augmentor_time: Optional[str],
     perturbator_time: Optional[str],
     downsample: bool,
@@ -21,7 +32,7 @@ def main(
     deviation_mode: str,
     non_constant_dim_tau: float,
     constant_dim_tau: float,
-) -> None:
+) -> Union[None, Tuple[float, float, float, float, float, float]]:
     assert task in [
         'cuts_plus',
         'plad',
@@ -40,6 +51,8 @@ def main(
             batch_size=batch_size,
             window_size=window_size,
             seed=seed,
+            epochs=epochs,
+            save_interval=save_interval,
         )
         if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
             logging.info('Experiment setup:')
@@ -60,6 +73,8 @@ def main(
             logging.info(f'- Graph end lambda: {trainer.graph_end_lambda}')
             logging.info(f'- Graph start lr: {trainer.graph_start_lr}')
             logging.info(f'- Graph end lr: {trainer.graph_end_lr}')
+            logging.info(f'- Epochs: {trainer.epochs}')
+            logging.info(f'- Save interval: {trainer.save_interval}')
             logging.info(f'- Seed: {trainer.seed}\n')
         
         if data in ['MSL', 'SMAP', 'SMD']:
@@ -87,13 +102,16 @@ def main(
             downsample_step=downsample_step,
             batch_size=batch_size,
             window_size=window_size,
+            discriminator_mode=discriminator_mode,
             epochs=epochs,
+            save_interval=save_interval,
             seed=seed,
         )
         if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
             logging.info('Experiment setup:')
             logging.info(f'- Batch size: {trainer.batch_size}')
             logging.info(f'- Window size: {trainer.window_size}')
+            logging.info(f'- Discriminator mode: {trainer.discriminator_mode}')
             logging.info(f'- Downsample: {trainer.downsample}')
 
             if downsample:
@@ -102,6 +120,8 @@ def main(
             logging.info(f'- Learning rate: {trainer.optim_learning_rate}')
             logging.info(f'- Weight decay: {trainer.optim_weight_decay}')
             logging.info(f'- Train epochs: {trainer.epochs}')
+            logging.info(f'- Epochs: {trainer.epochs}')
+            logging.info(f'- Save interval: {trainer.save_interval}')
             logging.info(f'- Seed: {trainer.seed}\n')
         
         trainer.train()
@@ -127,6 +147,7 @@ def main(
             downsample_step=downsample_step,
             seed=seed,
             epochs=epochs,
+            save_interval=save_interval,
         )
         
         if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
@@ -153,6 +174,7 @@ def main(
             )
             logging.info(f'- Learning rate: {trainer.learning_rate}')
             logging.info(f'- Epochs: {trainer.epochs}')
+            logging.info(f'- Save interval: {trainer.save_interval}')
             logging.info(f'- Seed: {seed}\n')
 
         trainer.train()
@@ -174,6 +196,26 @@ def main(
             logging.info(
                 f'- Positive augmentor timestamp: {positive_augmentor_time}')
             logging.info(f'- Perturbator timestamp: {perturbator_time}')
+            logging.info(f'- Positive augmentor noise more: {positive_augmentor_noise_more}')
+            logging.info(
+                f'- Make second negaitve pairs: {make_second_negative_pair}'
+            )
+
+            if make_second_negative_pair:
+                logging.info(f'- Causality distort: {causality_distort}')
+                logging.info(
+                    f'- Negative augmentor noise more: {negative_augmentor_noise_more}'
+                )
+                logging.info(
+                    f'- Negative augmentor noise type: {negative_augmentor_noise_type}'
+                )
+
+                if mix_negative_pairs:
+                    logging.info(f'- Mix negative pairs: {True}')
+                    logging.info(
+                        f'- Second negative pair ratio: {second_negative_pair_ratio}'
+                    )
+            
             logging.info(f'- Downsample: {downsample}')
 
             if downsample:
@@ -196,6 +238,15 @@ def main(
             seed=seed,
             window_size=window_size,
             perturbator_mode=perturbator_mode,
+            perturbator_epoch=perturbator_epoch,
+            positive_augmentor_noise_more=positive_augmentor_noise_more,
+            make_second_negative_pair=make_second_negative_pair,
+            causality_distort=causality_distort,
+            negative_augmentor_noise_more=negative_augmentor_noise_more,
+            negative_augmentor_noise_type=negative_augmentor_noise_type,
+            mix_negative_pairs=mix_negative_pairs,
+            second_negative_pair_ratio=second_negative_pair_ratio,
+            use_infonce_loss=use_infonce_loss,
             positive_augementor_time=positive_augmentor_time,
             perturbator_time=perturbator_time,
             downsample=downsample,
@@ -228,9 +279,9 @@ def main(
             learning_rate=1e-2,
         )
         classification_trainer.train()
-        f1, tp, fp, fn, aucpr = classification_trainer.inference()
+        f1, tp, fp, fn, aucpr, aucroc = classification_trainer.inference()
 
-        return f1, tp, fp, fn, aucpr
+        return f1, tp, fp, fn, aucpr, aucroc
     
     elif task == 'all':
         if subdata in ['C-1', 'A-1', 'machine-1-1'] or data in ['SWaT', 'WADI']:
@@ -251,20 +302,35 @@ def main(
             window_size=window_size,
             seed=seed,
             gpu_num=gpu_num,
+            epochs=epochs,
+            save_interval=save_interval,
         )
         cuts_plus_trainer.train()
 
-        perturbation_trainer = TCNPerturbatorTrainer(
-            time=time,
-            data=data,
-            subdata=subdata,
-            batch_size=256,
-            window_size=window_size,
-            downsample=downsample,
-            downsample_step=downsample_step,
-            seed=seed,
-            gpu_num=gpu_num,
-        )
+        if perturbator_mode == 'plad':
+            perturbation_trainer = PLADTrainer(
+                time=time,
+                data=data,
+                subdata=subdata,
+                downsample=downsample,
+                downsample_step=downsample_step,
+                batch_size=256,
+                window_size=window_size,
+                discriminator_mode=discriminator_mode,
+            )
+        elif perturbator_mode == 'tcn_perturbator':
+            perturbation_trainer = TCNPerturbatorTrainer(
+                time=time,
+                data=data,
+                subdata=subdata,
+                batch_size=256,
+                window_size=window_size,
+                downsample=downsample,
+                downsample_step=downsample_step,
+                seed=seed,
+                gpu_num=gpu_num,
+            )
+        
         perturbation_trainer.train()
         perturbation_trainer.eval()
 
@@ -273,6 +339,12 @@ def main(
             data=data,
             subdata=subdata,
             window_size=window_size,
+            perturbator_mode=perturbator_mode,
+            perturbator_epoch=perturbator_epoch,
+            positive_augmentor_noise_more=positive_augmentor_noise_more,
+            make_second_negative_pair=make_second_negative_pair,
+            causality_distort=causality_distort,
+            negative_augmentor_noise_more=negative_augmentor_noise_more,
             positive_augementor_time=time,
             perturbator_time=time,
             downsample=downsample,
@@ -306,7 +378,7 @@ def main(
         classification_trainer.train()
         f1, tp, fp, fn, aucpr = classification_trainer.inference()
 
-        return f1, tp, fp, fn, aucpr
+        return f1, tp, fp, fn, aucpr, aucroc
 
 
 if __name__ == '__main__':
@@ -320,27 +392,53 @@ if __name__ == '__main__':
     args.add_argument(
         '--task',
         type=str,
+        choices=['cuts_plus', 'plad', 'perturbation', 'pretext_classification'],
         required=True,
         help="Task name."
     )
     args.add_argument(
         '--data',
         type=str,
+        choices=['MSL', 'SMAP', 'SMD', 'SWaT', 'WADI'],
         required=True,
         help="Name of dataset.",
     )
     args.add_argument(
         '--subdata',
         type=str,
-        help="Name of subdata. Only for MSL, SMAP, SMD when you want to run " \
-             "this script on specific subdata. If it is None, then this script" \
-             "runs on the entire subset."
+        help="For when you want to run this script on some subdata of MSL," \
+             "SMAP, or SMD. If None, then this runs on the entire subset.",
+    )
+    args.add_argument(
+        '--retrain',
+        type=str2bool,
+        default=False,
+        help="Whether to retrain or not. Default 'False'.",
+    )
+    args.add_argument(
+        '--restart-subdata',
+        type=str,
+        help="For when you want to retrain from some subdata of MSL, SMAP," \
+             "or SMD."
+    )
+    args.add_argument(
+        '--restart-epoch',
+        type=int,
+        help="The epoch where the retraining starts." \
+             "Only for when retrain is True.",
     )
     args.add_argument(
         '--window-size',
         type=int,
         default=10,
         help="Length of window. Default 10.",
+    )
+    args.add_argument(
+        '--discriminator-mode',
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help="Discriminator mode. Default 1."
     )
     args.add_argument(
         '--gpu-num',
@@ -354,6 +452,11 @@ if __name__ == '__main__':
         help="Train epochs."
     )
     args.add_argument(
+        '--save-interval',
+        type=int,
+        help="Model and optimizer are saved once in this epochs."
+    )
+    args.add_argument(
         '--seed',
         type=int,
         default=42,
@@ -362,7 +465,74 @@ if __name__ == '__main__':
     args.add_argument(
         '--perturbator-mode',
         type=str,
-        help="The mode of perturbator. Either 'plad' or 'tcn_perturbator'",
+        choices=['plad', 'tcn_perturbator'],
+        default='plad',
+        help="The mode of perturbator. Default 'plad'.",
+    )
+    args.add_argument(
+        '--perturbator-epoch',
+        type=int,
+        default=50,
+        help="The epoch of pre-trained perturbator. Default 50."
+    )
+    args.add_argument(
+        '--positive-augmentor-noise-more',
+        type=str2bool,
+        default=False,
+        help="Whether to add gaussian noise to more timestamp in making" \
+             "positie pair. Default False.",
+    )
+    args.add_argument(
+        '--make-second-negative-pair',
+        type=str2bool,
+        default=False,
+        help="Whether to make second negative pair in pretext stage." \
+             "Default False.",
+    )
+    args.add_argument(
+        '--causality-distort',
+        type=str,
+        choices=['perturb', 'reverse'],
+        default='perturb',
+        help="How to perturb causality matrix for second negative pair." \
+             "If 'perturb', then some values are added to causality matrix." \
+             "If 'reverse', then the matrix is subtracted from 1," \
+             "              and the binary mask is applied."
+    )
+    args.add_argument(
+        '--negative-augmentor-noise-more',
+        type=str2bool,
+        default=False,
+        help="Whether to add gaussian noise to more timestamp in making" \
+             "second negative pair. Default False.",
+    )
+    args.add_argument(
+        '--negative-augmentor-noise-type',
+        type=str,
+        choices=['gaussian', 'constants'],
+        help="The type of noise that negative augmentgor gives to anchor." \
+             "If 'gaussian', then 0.1 * gaussian noise will be added." \
+             "If 'constants', then random value in (-0.4, -0.3, ..., 0.3, 0.4)" \
+             "                will be added.",
+    )
+    args.add_argument(
+        '--mix-negative-pairs',
+        type=str2bool,
+        default=False,
+        help="Make second negative pairs and want to mix negatie pairs." \
+              "Default False.",
+    )
+    args.add_argument(
+        '--second-negative-pair-ratio',
+        type=float,
+        help="Ratio of second negatve pairs when mixing negative pairs." \
+    )
+    args.add_argument(
+        '--use-infonce-loss',
+        type=str2bool,
+        default=False,
+        help="Use InfoNCE loss when using two negative pairs per anchor." \
+             "Default False."
     )
     args.add_argument(
         '--positive-augmentor-time',
@@ -414,20 +584,12 @@ if __name__ == '__main__':
         type=float,
         help="Determines threshold when applying patch to constant dim."
     )
+    args.add_argument(
+        '--want-time',
+        type=str,
+        help="Time that you want to replace for some purpose."
+    )
     config = args.parse_args()
-
-    assert config.task in [
-        'cuts_plus',
-        'plad',
-        'perturbation',
-        'pretext_classification',
-    ], "'plad', 'cuts_plus', 'perturbation', 'pretext_classification'"
-
-    assert config.data in ['MSL', 'SMAP', 'SMD', 'SWaT', 'WADI'], \
-    "'MSL', 'SMAP', 'SMD', 'SWaT', 'WADI'"
-
-    if config.perturbator_mode is not None:
-        assert config.perturbator_mode in ['plad', 'tcn_perturbator']
 
     if config.task == 'cuts_plus':
         batch_size = 100
@@ -447,6 +609,9 @@ if __name__ == '__main__':
     
     time = datetime.datetime.now()
     time = time.strftime('%m%d_%H%M')
+
+    if config.want_time is not None:
+        time = config.want_time
 
     if config.task == 'cuts_plus':
         set_logging_file(
@@ -478,19 +643,31 @@ if __name__ == '__main__':
             fp_list = []
             fn_list = []
             aucpr_list = []
+            aucroc_list = []
             
             if config.task == 'pretext_classification':
                 for subdata in data_list:
-                    f1, tp, fp, fn, aucpr = main(
+                    f1, tp, fp, fn, aucpr, aucroc = main(
                         time=time,
                         task=config.task,
                         data=config.data,
                         subdata=subdata,
-                        window_size=config.window_size,
                         batch_size=batch_size,
+                        window_size=config.window_size,
                         gpu_num=config.gpu_num,
                         epochs=config.epochs,
+                        save_interval=config.save_interval,
                         perturbator_mode=config.perturbator_mode,
+                        perturbator_epoch=config.perturbator_epoch,
+                        discriminator_mode=config.discriminator_mode,
+                        positive_augmentor_noise_more=config.positive_augmentor_noise_more,
+                        make_second_negative_pair=config.make_second_negative_pair,
+                        causality_distort=config.causality_distort,
+                        negative_augmentor_noise_more=config.negative_augmentor_noise_more,
+                        negative_augmentor_noise_type=config.negative_augmentor_noise_type,
+                        mix_negative_pairs=config.mix_negative_pairs,
+                        second_negative_pair_ratio=config.second_negative_pair_ratio,
+                        use_infonce_loss=config.use_infonce_loss,
                         positive_augmentor_time=config.positive_augmentor_time,
                         perturbator_time=config.perturbator_time,
                         downsample=config.downsample,
@@ -507,12 +684,14 @@ if __name__ == '__main__':
                     fp_list.append(fp)
                     fn_list.append(fn)
                     aucpr_list.append(aucpr)
+                    aucroc_list.append(aucroc)
                 
                 f1_list = np.array(f1_list)
                 tp_list = np.array(tp_list)
                 fp_list = np.array(fp_list)
                 fn_list = np.array(f1_list)
                 aucpr_list = np.array(aucpr_list)
+                aucroc_list = np.array(aucroc_list)
 
                 best_f1 = np.max(f1_list)
                 precision, recall, f1_micro = mirco_f1(
@@ -522,6 +701,8 @@ if __name__ == '__main__':
                 )
                 aucpr_mean = np.mean(aucpr_list)
                 aucpr_std = np.std(aucpr_list)
+                aucroc_mean = np.mean(aucroc_list)
+                aucroc_std = np.std(aucroc_list)
                 f1_macro = macro_f1(f1_list=f1_list)
 
                 logging.info('Scores')
@@ -531,6 +712,8 @@ if __name__ == '__main__':
                 logging.info(f'- Recall: {round(recall, 4)}')
                 logging.info(f'- AUC-PR mean: {round(aucpr_mean, 4)}')
                 logging.info(f'- AUC-PR std: {round(aucpr_std, 4)}')
+                logging.info(f'- AUC-ROC mean: {round(aucroc_mean, 4)}')
+                logging.info(f'- AUC-ROC std: {round(aucroc_std, 4)}')
                 logging.info(f'- Macro F1: {round(f1_macro, 4)}')
     
             else:
@@ -540,11 +723,22 @@ if __name__ == '__main__':
                         task=config.task,
                         data=config.data,
                         subdata=subdata,
-                        window_size=config.window_size,
                         batch_size=batch_size,
+                        window_size=config.window_size,
                         gpu_num=config.gpu_num,
                         epochs=config.epochs,
+                        save_interval=config.save_interval,
                         perturbator_mode=config.perturbator_mode,
+                        perturbator_epoch=config.perturbator_epoch,
+                        discriminator_mode=config.discriminator_mode,
+                        positive_augmentor_noise_more=config.positive_augmentor_noise_more,
+                        make_second_negative_pair=config.make_second_negative_pair,
+                        causality_distort=config.causality_distort,
+                        negative_augmentor_noise_more=config.negative_augmentor_noise_more,
+                        negative_augmentor_noise_type=config.negative_augmentor_noise_type,
+                        mix_negative_pairs=config.mix_negative_pairs,
+                        second_negative_pair_ratio=config.second_negative_pair_ratio,
+                        use_infonce_loss=config.use_infonce_loss,
                         positive_augmentor_time=config.positive_augmentor_time,
                         perturbator_time=config.perturbator_time,
                         downsample=config.downsample,
@@ -559,17 +753,28 @@ if __name__ == '__main__':
 
         else:
             if config.task == 'pretext_classification':
-                f1, tp, fp, fn, aucpr = main(
+                f1, tp, fp, fn, aucpr, aucroc = main(
                     time=time,
                     task=config.task,
                     data=config.data,
                     subdata=config.subdata,
-                    window_size=config.window_size,
                     batch_size=batch_size,
+                    window_size=config.window_size,
                     gpu_num=config.gpu_num,
                     epochs=config.epochs,
+                    save_interval=config.save_interval,
                     perturbator_mode=config.perturbator_mode,
+                    perturbator_epoch=config.perturbator_epoch,
+                    discriminator_mode=config.discriminator_mode,
                     positive_augmentor_time=config.positive_augmentor_time,
+                    positive_augmentor_noise_more=config.positive_augmentor_noise_more,
+                    make_second_negative_pair=config.make_second_negative_pair,
+                    causality_distort=config.causality_distort,
+                    negative_augmentor_noise_more=config.negative_augmentor_noise_more,
+                    negative_augmentor_noise_type=config.negative_augmentor_noise_type,
+                    mix_negative_pairs=config.mix_negative_pairs,
+                    second_negative_pair_ratio=config.second_negative_pair_ratio,
+                    use_infonce_loss=config.use_infonce_loss,
                     perturbator_time=config.perturbator_time,
                     downsample=config.downsample,
                     downsample_step=config.downsample_step,
@@ -588,6 +793,7 @@ if __name__ == '__main__':
                 logging.info(f'- Precision: {round(precision, 4)}')
                 logging.info(f'- Recall: {round(recall, 4)}')
                 logging.info(f'- AUC-PR: {round(aucpr, 4)}')
+                logging.info(f'- AUC-ROC: {round(aucroc, 4)}')
                 logging.info(f'- True positives: {round(tp, 4)}')
                 logging.info(f'- False positives: {round(fp, 4)}')
                 logging.info(f'- False negatives: {round(fn, 4)}')
@@ -598,11 +804,22 @@ if __name__ == '__main__':
                     task=config.task,
                     data=config.data,
                     subdata=config.subdata,
-                    window_size=config.window_size,
                     batch_size=batch_size,
+                    window_size=config.window_size,
                     gpu_num=config.gpu_num,
                     epochs=config.epochs,
+                    save_interval=config.save_interval,
                     perturbator_mode=config.perturbator_mode,
+                    perturbator_epoch=config.perturbator_epoch,
+                    discriminator_mode=config.discriminator_mode,
+                    positive_augmentor_noise_more=config.positive_augmentor_noise_more,
+                    make_second_negative_pair=config.make_second_negative_pair,
+                    causality_distort=config.causality_distort,
+                    negative_augmentor_noise_more=config.negative_augmentor_noise_more,
+                    negative_augmentor_noise_type=config.negative_augmentor_noise_type,
+                    mix_negative_pairs=config.mix_negative_pairs,
+                    second_negative_pair_ratio=config.second_negative_pair_ratio,
+                    use_infonce_loss=config.use_infonce_loss,
                     positive_augmentor_time=config.positive_augmentor_time,
                     perturbator_time=config.perturbator_time,
                     downsample=config.downsample,
@@ -617,16 +834,27 @@ if __name__ == '__main__':
             
     elif config.data in ['SWaT', 'WADI']:
         if config.task == 'pretext_classification':
-            f1, tp, fp, fn, aucpr = main(
+            f1, tp, fp, fn, aucpr, aucroc = main(
                 time=time,
                 task=config.task,
                 data=config.data,
                 subdata=None,
-                window_size=config.window_size,
                 batch_size=batch_size,
+                window_size=config.window_size,
                 gpu_num=config.gpu_num,
                 epochs=config.epochs,
+                save_interval=config.save_interval,
                 perturbator_mode=config.perturbator_mode,
+                perturbator_epoch=config.perturbator_epoch,
+                discriminator_mode=config.discriminator_mode,
+                positive_augmentor_noise_more=config.positive_augmentor_noise_more,
+                make_second_negative_pair=config.make_second_negative_pair,
+                causality_distort=config.causality_distort,
+                negative_augmentor_noise_more=config.negative_augmentor_noise_more,
+                negative_augmentor_noise_type=config.negative_augmentor_noise_type,
+                mix_negative_pairs=config.mix_negative_pairs,
+                second_negative_pair_ratio=config.second_negative_pair_ratio,
+                use_infonce_loss=config.use_infonce_loss,
                 positive_augmentor_time=config.positive_augmentor_time,
                 perturbator_time=config.pertrbator_time,
                 downsample=config.downsample,
@@ -647,6 +875,7 @@ if __name__ == '__main__':
             logging.info(f'- Precision: {round(precision, 4)}')
             logging.info(f'- Recall: {round(recall, 4)}')
             logging.info(f'- AUC-PR: {round(aucpr, 4)}')
+            logging.info(f'- AUC-ROC: {round(aucroc, 4)}')
             logging.info(f'- True positives: {round(tp, 4)}')
             logging.info(f'- False positives: {round(fp, 4)}')
             logging.info(f'- False negatives: {round(fn, 4)}')
@@ -657,11 +886,22 @@ if __name__ == '__main__':
                 task=config.task,
                 data=config.data,
                 subdata=None,
-                window_size=config.window_size,
                 batch_size=batch_size,
+                window_size=config.window_size,
                 gpu_num=config.gpu_num,
                 epochs=config.epochs,
+                save_interval=config.save_interval,
                 perturbator_mode=config.perturbator_mode,
+                perturbator_epoch=config.perturbator_epoch,
+                discriminator_mode=config.discriminator_mode,
+                positive_augmentor_noise_more=config.positive_augmentor_noise_more,
+                make_second_negative_pair=config.make_second_negative_pair,
+                causality_distort=config.causality_distort,
+                negative_augmentor_noise_more=config.negative_augmentor_noise_more,
+                negative_augmentor_noise_type=config.negative_augmentor_noise_type,
+                mix_negative_pairs=config.mix_negative_pairs,
+                second_negative_pair_ratio=config.second_negative_pair_ratio,
+                use_infonce_loss=config.use_infonce_loss,
                 positive_augmentor_time=config.positive_augmentor_time,
                 perturbator_time=config.perturbator_time,
                 downsample=config.downsample,

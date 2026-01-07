@@ -5,6 +5,8 @@ def main(
     exp_name: str,
     dataset: str,
     task: str,
+    downsample: bool = False,
+    downsample_step: int = 5,
     start_subdata: Optional[str] = None,
     pretext_timestamp: Optional[str] = None,
     pretext_scheme: str = 'carla',
@@ -72,6 +74,10 @@ def main(
     logging.info(f'- Task: {task}')
     logging.info(f'- Date: {timestamp.replace('_', ' ')}')
     logging.info(f'- Dataset: {dataset}')
+    logging.info(f'- Downsample: {downsample}')
+    
+    if downsample:
+        logging.info(f'- Dowmsample step: {downsample_step}')
 
     if start_subdata is not None:
         logging.info(f'- Starts from {start_subdata}')
@@ -115,6 +121,8 @@ def main(
                     dataset=dataset,
                     timestamp=timestamp,
                     subdata=subdata,
+                    downsample=downsample,
+                    downsample_step=downsample_step,
                     scheme=pretext_scheme,
                     inject_different_anomalies=inject_different_anomalies,
                     use_pretrained_vae=use_pretrained_vae,
@@ -130,6 +138,8 @@ def main(
                         dataset=dataset,
                         timestamp=timestamp,
                         subdata=subdata,
+                        downsample=downsample,
+                        downsample_step=downsample_step,
                         scheme=pretext_scheme,
                         gpu_num=gpu_num,
                         batch_size=batch_size,
@@ -143,6 +153,8 @@ def main(
                     dataset=dataset,
                     timestamp=timestamp,
                     subdata=subdata,
+                    downsample=downsample,
+                    downsample_step=downsample_step,
                     scheme=pretext_scheme,
                     inject_different_anomalies=inject_different_anomalies,
                     use_pretrained_vae=use_pretrained_vae,
@@ -156,6 +168,8 @@ def main(
                         dataset=dataset,
                         timestamp=timestamp,
                         subdata=subdata,
+                        downsample=downsample,
+                        downsample_step=downsample_step,
                         scheme=pretext_scheme,
                         gpu_num=gpu_num,
                         batch_size=batch_size,
@@ -210,12 +224,14 @@ def main(
             logging.info(f'- AUC-PR std: {round(auc_pr_std, 4)}')
             logging.info(f'- Macro F1: {round(f1_macro, 4)}')
 
-    elif dataset == 'SWaT':
+    elif dataset in ['SWaT', 'WADI']:
         if task == 'pretext':
             pretext(
                 dataset=dataset,
                 timestamp=timestamp,
-                subdata=subdata,
+                subdata=None,
+                downsample=downsample,
+                downsample_step=downsample_step,
                 scheme=pretext_scheme,
                 inject_different_anomalies=inject_different_anomalies,
                 use_pretrained_vae=use_pretrained_vae,
@@ -230,7 +246,9 @@ def main(
                 classification(
                     dataset=dataset,
                     timestamp=timestamp,
-                    subdata=subdata,
+                    subdata=None,
+                    downsample=downsample,
+                    downsample_step=downsample_step,
                     scheme=pretext_scheme,
                     gpu_num=gpu_num,
                     batch_size=batch_size,
@@ -244,6 +262,8 @@ def main(
                 dataset=dataset,
                 timestamp=timestamp,
                 subdata=None,
+                downsample=downsample,
+                downsample_step=downsample_step,
                 scheme=pretext_scheme,
                 inject_different_anomalies=inject_different_anomalies,
                 use_pretrained_vae=use_pretrained_vae,
@@ -256,7 +276,9 @@ def main(
                 classification(
                     dataset=dataset,
                     timestamp=timestamp,
-                    subdata=subdata,
+                    subdata=None,
+                    downsample=downsample,
+                    downsample_step=downsample_step,
                     scheme=pretext_scheme,
                     gpu_num=gpu_num,
                     batch_size=batch_size,
@@ -327,6 +349,18 @@ if __name__ == '__main__':
         type=str,
         required=True,
         help="Name of the dataset."
+    )
+    args.add_argument(
+        '--downsample',
+        type=str2bool,
+        default=False,
+        help="Downsample data. Default False."
+    )
+    args.add_argument(
+        '--downsample-step',
+        type=int,
+        default=5,
+        help="Downsample step. Default 5."
     )
     args.add_argument(
         '--task',
@@ -448,6 +482,8 @@ if __name__ == '__main__':
         exp_name=config.exp_name,
         dataset=config.dataset,
         task=config.task,
+        downsample=config.downsample,
+        downsample_step=config.downsample_step,
         start_subdata=config.start_subdata,
         pretext_timestamp=config.pretext_timestamp,
         pretext_scheme=config.pretext_scheme,

@@ -97,8 +97,16 @@ class PretextDataset(object):
                 'genias', 'data', 'dataset', dataset, 'swat_train2.csv'
             )
             data = pd.read_csv(data_dir)
-            data = data.iloc[:, :-1].to_numpy()
+            data = data.iloc[1:, 1:-1].to_numpy()
             self.data_dim = data.shape[-1]
+        
+        elif dataset == 'WADI':
+            data_dir = os.path.join(
+                'genias', 'data', 'dataset', dataset, 'WADI_14days_new.csv'
+            )
+            data = pd.read_csv(data_dir)
+            data = data.dropna(axis='columns', how='all').dropna()
+            data = data.iloc[:, 3:].to_numpy()
         
         if downsample:
             data = downsample_data(data=data, downsample_step=downsample_step)
@@ -311,15 +319,33 @@ class ClassificationDataset(object):
             )
         
         elif dataset == 'SWaT':
-            train_data = pd.read_csv(
-                os.path.join(data_dir, 'swat_train2..csv')
-            )
-            self.train_data = train_data.iloc[:, :-1].to_numpy()
-
+            train_data = pd.read_csv(os.path.join(data_dir, 'swat_train2.csv'))
+            self.train_data = train_data.iloc[1:, 1:-1].to_numpy()
+            
             test_data = pd.read_csv(os.path.join(data_dir, 'swat2.csv'))
-            test_labels = test_data.iloc[:, -1] == 1
+
+            test_labels = test_data.iloc[1:, -1] == 1
             self.test_labels = test_labels.to_numpy().astype(int)
-            self.test_data = test_data.iloc[:, :-1].to_numpy()
+
+            self.test_data = test_data.iloc[1: 1:-1].to_numpy()
+        
+        elif dataset == 'WADI':
+            train_data = pd.read_csv(
+                os.path.join(data_dir, 'WADI_14days_new.csv')
+            )
+            train_data = train_data.dropna(axis='columns', how='all').dropna()
+            self.train_data = train_data.iloc[:, 3:].to_numpy()
+
+            test_data = pd.read_csv(
+                os.path.join(data_dir, 'WADI_attackLABLE.csv'),
+                header=1,
+            )
+            test_data = test_data.dropna(axis='columns', how='all').dropna()
+
+            test_labels = test_data.iloc[:, -1] == -1
+            self.test_labels = test_labels.to_numpy().astype(int)
+
+            self.test_data = test_data.iloc[:, 3:-1].to_numpy()
         
         if downsample:
             self.train_data = downsample_data(
@@ -330,8 +356,8 @@ class ClassificationDataset(object):
                 data=self.test_data,
                 downsample_step=downsample_step,
             )
-            self.train_labels = downsample_data(
-                data=self.train_labels,
+            self.test_labels = downsample_data(
+                data=self.test_labels,
                 downsample_step=downsample_step,
             )
         

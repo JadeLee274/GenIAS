@@ -1,3 +1,4 @@
+from tqdm import tqdm
 from torch.utils.data import DataLoader
 import torch.optim as optim
 from faiss import IndexFlatL2
@@ -12,6 +13,8 @@ def pretext(
     dataset: str,
     timestamp: str,
     subdata: Optional[str] = None,
+    downsample: bool = False,
+    downsample_step: int = 5,
     scheme: str = 'carla',
     inject_different_anomalies: bool = False,
     use_pretrained_vae: bool = True,
@@ -38,7 +41,10 @@ def pretext(
             gpu_num=gpu_num,
         )
     
-    logging.info(f'Pretext training on {dataset} {subdata} start...\n')
+    if dataset in ['MSL', 'SMAP', 'SMD']:
+        logging.info(f'Pretext training on {dataset} {subdata} start...\n')
+    elif dataset in ['SWaT', 'WADI']:
+        logging.info(f'Pretext training on {dataset} start...\n')
 
     train_dataset = PretextDataset(
         dataset=dataset,
@@ -48,6 +54,8 @@ def pretext(
         inject_different_anomalies=inject_different_anomalies,
         mix_step=mix_step,
         cut_negative_pairs=cut_negative_pairs,
+        downsample=downsample,
+        downsample_step=downsample_step,
     )
     data_dim = train_dataset.data_dim
 
@@ -139,7 +147,10 @@ def pretext(
     )
 
     logging.info('')
-    logging.info(f'Pretext training on {dataset} {subdata} finished.\n')
+    if dataset in ['MSL', 'SMAP', 'SMD']:
+        logging.info(f'Pretext training on {dataset} {subdata} finished.\n')
+    elif dataset in ['SWaT', 'WADI']:
+        logging.info(f'Pretext training on {dataset} finished.\n')
 
     print(f'Start saving top-{num_neighbors} neighbors...')
     model.eval()
@@ -195,7 +206,7 @@ def pretext(
     nearest_indices_list = []
     furthest_indices_list = []
 
-    for anchor_rep in anchor_reps:
+    for anchor_rep in tqdm(anchor_reps):
         anchor_query = anchor_rep.reshape(1, -1)
         _, indices = index_searcher.search(anchor_query, reps.shape[0])
         indices = indices.reshape(-1)
@@ -224,7 +235,7 @@ def pretext(
     nearest_indices_list = []
     furthest_indices_list = []
 
-    for negative_rep in negative_reps:
+    for negative_rep in tqdm(negative_reps):
         negative_query = negative_rep.reshape(1, -1)
         _, indices = index_searcher.search(negative_query, reps.shape[0])
         indices = indices.reshape(-1)
@@ -258,6 +269,8 @@ def classification(
     dataset: str,
     timestamp: str,
     subdata: Optional[str] = None,
+    downsample: bool = False,
+    downsample_step: int = 5,
     scheme: str = 'carla',
     gpu_num: int = 0,
     epochs: int = 100,
@@ -274,6 +287,8 @@ def classification(
     train_dataset = ClassificationDataset(
         dataset=dataset,
         timestamp=timestamp,
+        downsample=downsample,
+        downsample_step=downsample_step,
         subdata=subdata,
         mode='train',
         scheme=scheme,
@@ -311,7 +326,15 @@ def classification(
     )
     criterion = classificationloss()
 
-    logging.info(f'Classification training on {dataset} {subdata} start...\n')
+    if dataset in ['MSL', 'SMAP', 'SMD']:
+        logging.info(
+            f'Classification training on {dataset} {subdata} start...\n'
+        )
+    elif dataset in ['SWaT', 'WADI']:
+        logging.info(
+            f'Classification training on {dataset} start...\n'
+        )
+    
     model.train()
 
     for epoch in range(epochs):
@@ -396,6 +419,8 @@ def classification(
         dataset=dataset,
         timestamp=timestamp,
         subdata=subdata,
+        downsample=downsample,
+        downsample_step=downsample_step,
         mode='test',
         scheme=scheme,
     )

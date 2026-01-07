@@ -16,6 +16,7 @@ temp.py
 *.xlsx
 
 # Ignore directory
+__pycache__/
 checkpoints/
 classification_dataset/
 data/
@@ -23,8 +24,9 @@ log/
 plad_base_code/
 plots/
 practice/
-__pycache__/
+results_npz/
 save/
+scripts/
 temp/
 temp_checkpoints/
 temp_classification/

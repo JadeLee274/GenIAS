@@ -2,7 +2,7 @@ import logging
 from tqdm import tqdm
 from math import cos, pi
 from faiss import IndexFlatL2
-from sklearn.metrics import precision_recall_curve, auc, f1_score
+from sklearn.metrics import precision_recall_curve, auc, f1_score, roc_auc_score
 from torch.utils.data import DataLoader
 from torch.optim import Adam
 from torch.optim.lr_scheduler import StepLR
@@ -263,9 +263,47 @@ class CUTSplusTrainer(object):
 
         return graph_loss, graph_loss_sparsity, graph_loss_data
     
-    def train(self) -> None:
+    def save_model_and_optimizer(self, epoch: int) -> None:
+        checkpoint = {
+            "epoch": epoch,
+            "model": self.model.state_dict(),
+            "pred_optim": self.pred_optimizer.state_dict(),
+            "graph_optim": self.graph_optimizer.state_dict(),
+            "cuasal_matrix": self.model.gt,
+            "seed": self.seed,
+        }
+        torch.save(
+            obj=checkpoint,
+            f=os.path.join(
+                self.ckpt_dir, f'epoch_{epoch}.pt'
+            ),
+        )
+        return
+
+    def load_model_and_optimizer(self, restart_epoch: int) -> None:
+        load_dir = os.path.join(self.ckpt_dir, f'epoch_{restart_epoch}.pt')
+        load = torch.load(load_dir)
+        self.model.load_state_dict(load['model'])
+        self.pred_optimizer.load_state_dict(load['pred_optim'])
+        self.graph_optimizer.load_state_dict(load['graph_optim'])
+        self.model.gt = load['cuasal_matrix']
+        self.metric_best = load['metric_best']
+
+        return
+    
+    def train(
+        self,
+        retrain: bool = False,
+        restart_epoch: Optional[int] = False,
+    ) -> None:
+        if retrain:
+            self.load_model_and_optimizer(restart_epoch=restart_epoch)
+        
         pbar = tqdm(total=self.epochs)
-        metric_best = float('inf')
+
+        if not retrain:
+            self.metric_best = float('inf')
+            
         graph_discover_step = 0
 
         for epoch in range(self.epochs):
@@ -368,7 +406,7 @@ class CUTSplusTrainer(object):
                     total_samples += previous_values.size(0)
             
             average_loss = total_loss / total_samples
-            is_best = average_loss < metric_best
+            is_best = average_loss < self.metric_best
 
             logging_info = f'- Evaluation prediction loss: {average_loss:.4e}\n'
 
@@ -381,12 +419,13 @@ class CUTSplusTrainer(object):
                     "graph_optim": self.graph_optimizer.state_dict(),
                     "cuasal_matrix": self.model.gt,
                     "seed": self.seed,
+                    "metric_best": self.metric_best,
                 }
                 torch.save(
                     obj=checkpoint_best,
                     f=os.path.join(self.ckpt_dir, 'best_model.pt'),
                 )
-                metric_best = average_loss
+                self.metric_best = average_loss
 
             logging.info(logging_info)            
 
@@ -419,6 +458,7 @@ class PLADTrainer(object):
         downsample_step: int,
         batch_size: int,
         window_size: int,
+        discriminator_mode: int = 1,
         optim_learning_rate: float = 1e-5,
         optim_weight_decay: float = 1e-3,
         gpu_num: int = 0,
@@ -433,6 +473,7 @@ class PLADTrainer(object):
         self.downsample_step = downsample_step
         self.batch_size = batch_size
         self.window_size = window_size
+        self.discriminator_mode = discriminator_mode
         self.optim_learning_rate = optim_learning_rate
         self.optim_weight_decay = optim_weight_decay
         self.epochs = epochs
@@ -472,6 +513,7 @@ class PLADTrainer(object):
         ).to(self.device)
         self.discriminator = Discriminator(data_dim=data_dim).to(self.device)
 
+
         self.optimizer = Adam(
             params=list(self.plad.parameters()) \
                    + list(self.discriminator.parameters()),
@@ -481,6 +523,13 @@ class PLADTrainer(object):
 
         self.plad_loss = PLADLoss(window_size=window_size, data_dim=data_dim)
         self.discriminator_loss = DiscriminatorLoss()
+
+        assert discriminator_mode in [1, 2], \
+        f"Discriminator mode {discriminator_mode} not 1 or 2"
+
+        if discriminator_mode == 2:
+            self.discriminator = Discriminator2(data_dim=data_dim).to(self.device)
+            self.discriminator_loss = DiscriminatorLoss2()
 
         # Make dirs
         self.ckpt_dir = os.path.join('exp', 'checkpoints', data)
@@ -497,7 +546,7 @@ class PLADTrainer(object):
 
         return
 
-    def save_model(self, epoch: int) -> None:
+    def save_model_and_optimizer(self, epoch: int) -> None:
         torch.save(
             obj={
                 'epoch': epoch,
@@ -512,8 +561,24 @@ class PLADTrainer(object):
             f=os.path.join(self.ckpt_dir, f'epoch_{epoch}.pt'),
         )
         return
+
+    def load_model_and_optimizer(self, retrain_epoch: int) -> None:
+        load_path = os.path.join(self.ckpt_dir, f'epoch_{retrain_epoch}.pt')
+        load = torch.load(load_path)
+        self.plad.load_state_dict(load['perturbator'])
+        self.discriminator.load_state_dict(load['discriminator'])
+        self.optimizer.load_state_dict(load['optimizer'])
+
+        return
     
-    def train(self) -> None:
+    def train(
+        self,
+        retrain: bool = False,
+        retrain_epoch: Optional[int] = None,
+    ) -> None:
+        if retrain:
+            self.load_model_and_optimizer(retrain_epoch=retrain_epoch)
+        
         self.plad.train()
         self.discriminator.train()
 
@@ -559,7 +624,7 @@ class PLADTrainer(object):
             logging.info(f'- Positive BCE: {epoch_positive_bce:.4e}\n')
 
             if epoch == 0 or (epoch + 1) % self.save_interval == 0:
-                self.save_model(epoch=epoch+1)
+                self.save_model_and_optimizer(epoch=epoch+1)
 
         return
     
@@ -726,63 +791,6 @@ class TCNPerturbatorTrainer(object):
 
         return
     
-    def plot_perturbation(
-        self,
-        epoch: int,
-        figsize: Tuple[int, int] = (15, 20),
-        ylim_upper: float = 10.0,
-    ) -> None:
-        var_num = self.data_dim // 5
-
-        save_path = os.path.join('exp', 'figs', 'perturbator', self.data)
-
-        if self.subdata is not None:
-            save_path = os.path.join(save_path, self.subdata)
-        
-        save_path = os.path.join(save_path, self.time, f'epoch_{epoch}')
-        os.makedirs(save_path, exist_ok=True)
-
-        for i in range(len(self.train_dataset) // self.window_size):
-            idx = i * self.window_size
-            data = self.train_dataset[idx]
-            data: Tensor = torch.tensor(data).float().unsqueeze(0)
-            data = data.to(self.device)
-            _, pert, _, _ = self.perturbator.forward(data)
-
-            data = data.squeeze(0).detach().cpu().numpy()
-            pert=  pert.squeeze(0).detach().cpu().numpy()
-
-            fig, axes = plt.subplots(var_num, 5, figsize=figsize)
-            axes = axes.flatten()
-
-            for i in range(self.data_dim):
-                axes[i].plot(data[:, i])
-                axes[i].set_title(f"Dim {i+1}")
-                axes[i].set_xticks([])
-                axes[i].set_yticks([])
-                axes[i].set_ylim(-ylim_upper, ylim_upper)
-                axes[i].set_yticks([-ylim_upper, ylim_upper])
-
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_path, f'data_{idx}.png'))
-            plt.close()
-
-            fig, axes = plt.subplots(var_num, 5, figsize=figsize)
-            axes = axes.flatten()
-
-            for i in range(self.data_dim):
-                axes[i].plot(pert[:, i])
-                axes[i].set_title(f"Dim {i+1}")
-                axes[i].set_xticks([])
-                axes[i].set_yticks([])
-                axes[i].set_ylim(-ylim_upper, ylim_upper)
-                axes[i].set_yticks([-ylim_upper, ylim_upper])
-
-            plt.tight_layout()
-            plt.savefig(os.path.join(save_path, f'neg_pair_{idx}.png'))
-            plt.close()
-        
-        return
     
     def train(self, retrain: bool, restart_epoch: int) -> None:
         if retrain:
@@ -861,9 +869,6 @@ class TCNPerturbatorTrainer(object):
             if epoch == 0 or (epoch + 1) % self.save_interval == 0:
                 self.save_model(epoch=epoch+1)
                 
-            if (epoch + 1) == self.epochs:
-                self.plot_perturbation(epoch=epoch+1)
-
         return
     
     def eval(self) -> None:
@@ -903,6 +908,15 @@ class PretextTrainer(object):
         seed: int,
         window_size: int,
         perturbator_mode: str,
+        perturbator_epoch: int,
+        positive_augmentor_noise_more: bool,
+        make_second_negative_pair: bool,
+        causality_distort: str,
+        negative_augmentor_noise_more: bool,
+        negative_augmentor_noise_type: str,
+        mix_negative_pairs: bool,
+        second_negative_pair_ratio: float,
+        use_infonce_loss: bool,
         positive_augementor_time: str,
         perturbator_time: str,
         downsample: bool,
@@ -920,6 +934,8 @@ class PretextTrainer(object):
     ) -> None:
         assert perturbator_mode in ['plad', 'tcn_perturbator'] ,\
         "perturbator_mode has to be either 'plad' or 'tcn_perturbator'"
+
+        self.make_second_negative_pair = make_second_negative_pair
     
         if subdata is not None:
             logging.info(f'Pretext training on {data} {subdata} start...\n')
@@ -934,7 +950,15 @@ class PretextTrainer(object):
             subdata=subdata,
             window_size=window_size,
             seed=seed,
+            positive_augmentor_noise_more=positive_augmentor_noise_more,
+            make_second_negative_pair=make_second_negative_pair,
+            causality_distort=causality_distort,
+            negative_augmentor_noise_more=negative_augmentor_noise_more,
+            negative_augmentor_noise_type=negative_augmentor_noise_type,
+            mix_negative_pairs=mix_negative_pairs,
+            second_negative_pair_ratio=second_negative_pair_ratio,
             perturbator_mode=perturbator_mode,
+            perturbator_epoch=perturbator_epoch,
             positive_augmentor_time=positive_augementor_time,
             perturbator_time=perturbator_time,
             processor_num=gpu_num,
@@ -946,7 +970,7 @@ class PretextTrainer(object):
             non_constant_dim_tau=non_constant_dim_tau,
             constant_dim_tau=constant_dim_tau,
             save_negative_pairs=True,
-            plot_perturbation=False,
+            plot_perturbations=False,
         )
         data_dim = train_dataset.data_dim
 
@@ -954,6 +978,10 @@ class PretextTrainer(object):
         self.device = torch.device(f'cuda:{gpu_num}')
         self.model = model.to(self.device)
         self.criterion = PretextLoss()
+
+        if make_second_negative_pair \
+           and (not mix_negative_pairs) and use_infonce_loss:
+            self.criterion = InfoNCELoss()
 
         self.train_loader = DataLoader(
             dataset=train_dataset,
@@ -1064,7 +1092,23 @@ class PretextTrainer(object):
 
         return
     
-    def select_neighbors(self) -> None:
+    def load_model_and_optimizer(self, timestamp: str) -> None:
+        load_dir = os.path.join(self.ckpt_dir, f'{timestamp}.pt')
+        load = torch.load(load_dir)
+        self.model.resnet.load_state_dict(load['resnet'])
+        self.model.contrastive_head.load_state_dict(load['contrastive_head'])
+        self.optimizer.load_state_dict(load['optimizer'])
+
+        return
+    
+    def select_neighbors(
+        self,
+        load: bool = False,
+        timestamp: Optional[str] = None,
+    ) -> None:
+        if load:
+            self.load_model_and_optimizer(timestamp=timestamp)
+        
         anchor_reps = []
         negative_reps = []
 
@@ -1230,7 +1274,12 @@ class ClassificationTrainer(object):
         )
         self.criterion = ClassificationLoss()
 
-        logging.info(f'Classification training on {data} {subdata} start...\n')
+        if data in ['MSL', 'SMAP', 'SMD']:
+            logging.info(
+                f'Classification training on {data} {subdata} start...\n'
+            )
+        else:
+            logging.info(f'Classification training on {data} start...\n')
 
         return
     
@@ -1313,7 +1362,7 @@ class ClassificationTrainer(object):
         
         return
     
-    def inference(self) -> None:
+    def inference(self) -> Tuple[float, float, float, float, float, float]:
         self.model.eval()
         inference_logits = []
 
@@ -1347,6 +1396,10 @@ class ClassificationTrainer(object):
         )
 
         auc_pr = auc(recall, precision)
+        auc_roc = roc_auc_score(
+            y_true=self.test_dataset.test_labels,
+            y_score=anomaly_scores,
+        )
 
         best_threshold = 0
         best_precision = 0
@@ -1366,6 +1419,7 @@ class ClassificationTrainer(object):
         logging.info(f'- Best Recall: {round(best_recall, 4)}')
         logging.info(f'- Best Threshold: {round(best_threshold, 4)}')
         logging.info(f'- AUC-PR: {round(auc_pr, 4)}')
+        logging.info(f'- AUC-ROC: {round(auc_roc, 4)}')
 
         best_anomaly_prediction \
         = np.where(anomaly_scores >= best_threshold, 1, 0)
@@ -1378,4 +1432,4 @@ class ClassificationTrainer(object):
         logging.info(f'- Best False Positive: {best_fp}')
         logging.info(f'- Best False Negative: {best_fn}\n')
 
-        return best_f1_score, best_tp, best_fp, best_fn, auc_pr      
+        return best_f1_score, best_tp, best_fp, best_fn, auc_pr, auc_roc

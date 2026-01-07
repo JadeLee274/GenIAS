@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
@@ -147,80 +148,6 @@ class CUTSplusDataset(object):
             return np.float32(self.test_data[idx]), self.test_labels[idx]
 
 
-class PositiveAugmentor(nn.Module):
-    def __init__(
-        self,
-        noise_injection_step: int,
-        prediction_step: int,
-        noise_level: float,
-        n_nodes: int,
-    ) -> None:
-        super().__init__()
-        self.noise_injection_step = noise_injection_step
-        self.prediction_step = prediction_step
-        self.noise_level = noise_level
-        self.causal_discoverer = CUTS_Plus_Net(n_nodes=n_nodes, data_dim=1)
-
-        return
-    
-    def init_causal_discoverer(
-        self,
-        time: str,
-        data: str,
-        subdata: Optional[str],
-        seed: int,
-    ) -> None:
-        cuts_plus_dir = os.path.join(
-            os.getcwd(), 'exp', 'checkpoints', data
-        )
-        # if not os.path.exists(cuts_plus_dir):
-        #     cuts_plus_dir = os.path.join(
-        #         os.getcwd(), 'cuts_plus', 'checkpoints', data
-        #     )
-
-        if subdata is not None:
-            cuts_plus_dir = os.path.join(cuts_plus_dir, subdata)
-            
-        cuts_plus_dir = os.path.join(cuts_plus_dir, time, 'best_model.pt')
-        cuts_plus_ckpt = torch.load(cuts_plus_dir)
-
-        assert cuts_plus_ckpt['seed'] == seed, \
-        f"CUTS+ seed {cuts_plus_ckpt['seed']} and current seed {seed} mismatch"
-        
-        self.causal_discoverer.load_state_dict(cuts_plus_ckpt['model'])
-        self.causal_discoverer.eval()
-        
-        return
-
-    def forward(self, x: Tensor, causality_matrix: Matrix) -> Tensor:
-        x_positive = x.clone()
-        causality_matrix = (causality_matrix > 0.5).int()
-        
-        start_node = random.choice(range(len(causality_matrix)))
-        self.start_node = start_node
-        
-        effects = [
-            i for i, val in enumerate(causality_matrix[start_node]) if val == 1
-        ]
-        self.effects = effects
-
-        x_positive[:, self.noise_injection_step, start_node] \
-        += torch.randn(x.size(0)).to(x.device) * self.noise_level
-
-        with torch.no_grad():
-            graph = (self.causal_discoverer.causality_mtx > 0.5).float()
-            graph = graph[None].expand(x.size(0), -1, -1)
-            graph_output = self.causal_discoverer.forward(
-                x=x_positive[:, :self.noise_injection_step],
-                fwd_graph=graph,
-            ).transpose(1, 2)
-        
-        x_positive[:, -self.prediction_step, effects] \
-        = graph_output[:, -self.prediction_step, effects]
-
-        return x_positive
-
-
 class PerturbationDataset(object):
     def __init__(
         self,
@@ -257,7 +184,7 @@ class PerturbationDataset(object):
             test_labels = test_labels.to_numpy().astype(int)
 
             test_data = test_data.iloc[:, :-1].to_numpy()
-        
+
         elif data == 'WADI':
             train_data = pd.read_csv(
                 os.path.join(data_path, 'WADI_14days_new.csv')
@@ -290,8 +217,10 @@ class PerturbationDataset(object):
                 downsample_step=downsample_step,
             )
         
+        
         self.scaler = StandardScaler()
         self.scaler.fit(train_data)
+        self.a = self.scaler.transform(train_data)
 
         self.train_data = convert_to_windows(
             data=train_data,
@@ -337,7 +266,211 @@ class PerturbationDataset(object):
             window = self.test_data[idx]
             window = self.scaler.transform(window)
             return window
+
+
+class PositiveAugmentor(nn.Module):
+    """
+    Positive pair generator following the method of CAROTS.
+    """
+    def __init__(
+        self,
+        noise_injection_step: int,
+        prediction_step: int,
+        noise_level: float,
+        window_size: int,
+        n_nodes: int,
+        noise_more: bool = False,
+    ) -> None:
+        super().__init__()
+        self.noise_injection_step = noise_injection_step
+        self.prediction_step = prediction_step
+        self.noise_level = noise_level
+        self.window_size = window_size
+        self.causal_discoverer = CUTS_Plus_Net(n_nodes=n_nodes, data_dim=1)
+        self.noise_more = noise_more
+        return
+    
+    def init_causal_discoverer(
+        self,
+        time: str,
+        data: str,
+        subdata: Optional[str],
+        seed: int,
+    ) -> None:
+        cuts_plus_dir = os.path.join(
+            os.getcwd(), 'exp', 'checkpoints', data
+        )
+
+        if subdata is not None:
+            cuts_plus_dir = os.path.join(cuts_plus_dir, subdata)
+            
+        cuts_plus_dir = os.path.join(
+            cuts_plus_dir, 'cuts_plus', time, 'best_model.pt'
+        )
+        cuts_plus_ckpt = torch.load(cuts_plus_dir)
+
+        assert cuts_plus_ckpt['seed'] == seed, \
+        f"CUTS+ seed {cuts_plus_ckpt['seed']} and current seed {seed} mismatch"
         
+        self.causal_discoverer.load_state_dict(cuts_plus_ckpt['model'])
+        self.causal_discoverer.eval()
+        
+        return
+
+    def forward(self, x: Tensor, causality_matrix: Matrix) -> Tensor:
+        x_positive = x.clone()
+        causality_matrix = (causality_matrix > 0.5).int()
+
+        # If we random choise, then effects can be [0, 0, 0, ..., 0], 
+        # making the positive pair meaningless...
+        start_node = random.choice(range(len(causality_matrix)))
+
+        # So we choose start node as follows, so that the effects
+        # have as many 1's as possible.
+        start_node = causality_matrix.sum(dim=1).argmax().item()
+        
+        self.start_node = start_node
+        effects = [
+            i for i, val in enumerate(causality_matrix[start_node]) if val == 1
+        ]
+        self.effects = effects
+
+        if self.noise_more:
+            noise_times = torch.tensor([i for i in range(self.window_size - 1)])
+            noise_num = random.choice([1, 2, 3, 4])
+            noise_idx = torch.randperm(len(noise_times))[:noise_num]
+            noise_times = noise_times[noise_idx]
+
+            for time in noise_times:
+                x_positive[:, time, start_node] \
+                += torch.randn(x.size(0)).to(x.device) * self.noise_level
+            
+        # x_positive[:, self.noise_injection_step, start_node] \
+        # += torch.randn(x.size(0)).to(x.device) * self.noise_level
+
+        with torch.no_grad():
+            graph = (self.causal_discoverer.causality_mtx > 0.5).float()
+            graph = graph[None].expand(x.size(0), -1, -1)
+            graph_output = self.causal_discoverer.forward(
+                x=x_positive[:, :self.noise_injection_step],
+                fwd_graph=graph,
+            ).transpose(1, 2)
+        
+        x_positive[:, -self.prediction_step, effects] \
+        = graph_output[:, -self.prediction_step, effects]
+        return x_positive
+
+
+class NegativeAugmentor(nn.Module):
+    """
+    Negative pair generator. Unlike CAROTS using DFS search, the causality 
+    matrix perturbation is used instead.
+    """
+    def __init__(
+        self,
+        noise_injection_step: int,
+        prediction_step: int,
+        noise_level: float,
+        window_size: int,
+        n_nodes: int,
+        causality_distort: str,
+        noise_more: bool,
+        noise_type: str,
+    ) -> None:
+        super().__init__()
+        assert causality_distort in ['perturb', 'reverse'], \
+               "causality distort is either 'perturb' or 'reverse'."
+        self.noise_injection_step = noise_injection_step
+        self.prediction_step = prediction_step
+        self.noise_level = noise_level
+        self.window_size = window_size
+        self.causal_discoverer = CUTS_Plus_Net(n_nodes=n_nodes, data_dim=1)
+        self.causality_distort = causality_distort
+        self.noise_more = noise_more
+        self.noise_type = noise_type
+        return
+    
+    def init_causal_discoverer(
+        self,
+        time: str,
+        data: str,
+        subdata: Optional[str],
+        seed: int,
+    ) -> None:
+        cuts_plus_dir = os.path.join(
+            os.getcwd(), 'exp', 'checkpoints', data
+        )
+
+        if subdata is not None:
+            cuts_plus_dir = os.path.join(cuts_plus_dir, subdata)
+            
+        cuts_plus_dir = os.path.join(
+            cuts_plus_dir, 'cuts_plus', time, 'best_model.pt'
+        )
+        cuts_plus_ckpt = torch.load(cuts_plus_dir)
+
+        assert cuts_plus_ckpt['seed'] == seed, \
+        f"CUTS+ seed {cuts_plus_ckpt['seed']} and current seed {seed} mismatch"
+        
+        self.causal_discoverer.load_state_dict(cuts_plus_ckpt['model'])
+        self.causal_discoverer.eval()
+        
+        return
+
+    def forward(self, x: Tensor, causality_matrix: Matrix) -> Tensor:
+        x_negative = x.clone()
+
+        if self.causality_distort == 'perturb':
+            perturbed_causality_matrix \
+            = perturb_causality_matrix(causality_matrix=causality_matrix)
+        elif self.causality_distort == 'reverse':
+            perturbed_causality_matrix \
+            = reverse_causality_matrix(causality_matrix=causality_matrix)
+        
+        perturbed_causality_matrix = (perturbed_causality_matrix > 0.5).int()
+
+        start_node = random.choice(range(len(perturbed_causality_matrix)))
+        self.start_node = start_node
+        
+        effects = [
+            i for i, val in enumerate(perturbed_causality_matrix[start_node]) if val == 1
+        ]
+        self.effects = effects
+
+        if self.noise_more:
+            noise_times = torch.tensor([i for i in range(self.window_size - 1)])
+            noise_num = random.choice([1, 2, 3])
+            noise_idx = torch.randperm(len(noise_times))[:noise_num]
+            noise_times = noise_times[noise_idx]
+            for time in noise_times:
+                if self.noise_type == 'gaussian':
+                    x_negative[:, time, start_node] \
+                    += torch.randn(x.size(0)).to(x.device) * self.noise_level
+                elif self.noise_type == 'constsnts':
+                    perturb_values = torch.tensor(
+                        [-0.4 + 0.1 * i for i in range(9)]
+                    )
+                    perturb_vector = perturb_values[
+                        torch.randint(0, 9, x.size(0))
+                    ].to(x.device)
+                    x_negative[:, time, start_node] += perturb_vector
+                
+        # x_negative[:, self.noise_injection_step, start_node] \
+        # += torch.randn(x.size(0)).to(x.device) * self.noise_level
+
+        with torch.no_grad():
+            graph = (perturbed_causality_matrix > 0.5).float()
+            graph = graph[None].expand(x.size(0), -1, -1)
+            graph_output = self.causal_discoverer.forward(
+                x=x_negative[:, :self.noise_injection_step],
+                fwd_graph=graph,
+            ).transpose(1, 2)
+        
+        x_negative[:, -self.prediction_step, effects] \
+        = graph_output[:, -self.prediction_step, effects]
+
+        return x_negative
+
 
 class PretextDataset(object):
     def __init__(
@@ -347,7 +480,15 @@ class PretextDataset(object):
         subdata: Optional[str],
         window_size: int,
         seed: int,
+        positive_augmentor_noise_more: bool,
+        make_second_negative_pair: bool,
+        causality_distort: str,
+        negative_augmentor_noise_more: bool,
+        negative_augmentor_noise_type: str,
+        mix_negative_pairs: bool,
+        second_negative_pair_ratio: float,
         perturbator_mode: str,
+        perturbator_epoch: int,
         positive_augmentor_time: str,
         perturbator_time: str,
         processor_num: int,
@@ -359,10 +500,23 @@ class PretextDataset(object):
         non_constant_dim_tau: float,
         constant_dim_tau: float,
         save_negative_pairs: bool,
-        plot_perturbation: bool,
+        plot_perturbations: bool,
     ) -> None:
         assert perturbator_mode in ['plad', 'tcn_perturbator'], \
         "perturbator_mode has to be either 'plad' or 'tcn_perturbator'"
+
+        assert causality_distort in ['perturb', 'reverse'], \
+        "causality_distort has to be either 'perturb' or 'reverse'"
+
+        self.time = time
+        self.data = data
+        self.subdata = subdata
+        self.make_second_negative_pair = make_second_negative_pair
+        self.mix_negative_pairs = mix_negative_pairs
+        self.apply_patch = apply_patch
+        self.patch_after = patch_after
+        self.non_constant_dim_tau = non_constant_dim_tau
+        self.constant_dim_tau = constant_dim_tau
 
         data_path = os.path.join('exp', 'data', data)
 
@@ -414,6 +568,7 @@ class PretextDataset(object):
         )
 
         data_dim = self.anchors.shape[-1]
+        self.window_size = window_size
         self.data_dim = data_dim
         n_nodes = data_dim
         
@@ -427,7 +582,9 @@ class PretextDataset(object):
             noise_injection_step=noise_injection_step,
             prediction_step=pretidction_step,
             noise_level=0.1,
+            window_size=window_size,
             n_nodes=n_nodes,
+            noise_more=positive_augmentor_noise_more,
         )
         positive_augmentor.init_causal_discoverer(
             time=positive_augmentor_time,
@@ -438,7 +595,7 @@ class PretextDataset(object):
         positive_augmentor = positive_augmentor.to(processor)
         causality_matrix = positive_augmentor.causal_discoverer.causality_mtx
         positive_augmentor.eval()
-        
+
         # Initialize negative augmentor(perturbator).
         if perturbator_mode == 'plad':
             latent_dim = 100 if data_dim > 1 else 50
@@ -451,7 +608,7 @@ class PretextDataset(object):
                 time=perturbator_time,
                 data=data,
                 subdata=subdata,
-                epoch=50,
+                epoch=perturbator_epoch,
             )
         
         elif perturbator_mode == 'tcnperturbator':
@@ -472,48 +629,77 @@ class PretextDataset(object):
         perturbator = perturbator.to(processor)
         perturbator.eval()
 
-        anchor_loader = DataLoader(
+        if data in ['MSL', 'SMAP']:
+            positive_augmentor_loader_batch_size = 10
+            negative_augmentor_loader_batch_size = 10
+        else:
+            positive_augmentor_loader_batch_size = 100
+            negative_augmentor_loader_batch_size = 100
+        
+
+        # Make positive pairs
+        positive_augmentor_loader = DataLoader(
+            dataset=self.anchors,
+            batch_size=positive_augmentor_loader_batch_size,
+            shuffle=False,
+        )
+
+        positive_pairs = torch.empty(1, window_size, data_dim).to(processor)
+        
+        for anchor in tqdm(positive_augmentor_loader):
+            anchor = anchor.to(processor)
+            positive_pair = positive_augmentor.forward(
+                x=anchor,
+                causality_matrix=causality_matrix,
+            ).detach()
+            positive_pairs = torch.cat(
+                tensors=[positive_pairs, positive_pair],
+                dim=0,
+            )
+        
+        self.positive_pairs = positive_pairs[1:, :, :].cpu().numpy()
+
+        assert self.positive_pairs.shape == self.anchors.shape, \
+        f"positive pairs length and anchors length mismatch"
+        
+        # Make Negative pairs.
+        perturbator_loader = DataLoader(
             dataset=self.anchors,
             batch_size=len(self.anchors),
             shuffle=False,
         )
 
-        # Make positive pairs.
-        anchors = next(iter(anchor_loader)).to(processor)
+        # [Step 1] Make perturbations by passing anchors through perturbator.
+        anchors = next(iter(perturbator_loader)).to(processor)
         assert len(anchors) == len(self.anchors), \
         f"len(anchors) {len(anchors)} != len(self.anchors) {len(self.anchors)}"
-        
-        # Positive pairs are (sort of) normalized.
-        self.positive_pairs = positive_augmentor.forward(
-            x=anchors,
-            causality_matrix=causality_matrix,
-        ).detach().cpu().numpy()
 
-        # Negative pairs are also normalized.
         if perturbator_mode == 'plad':
             negative_pairs, _ = perturbator.forward(x=anchors)
         
         elif perturbator_mode == 'tcn_perturbator':
             _, negative_pairs, _, _ = perturbator.forward(x=anchors)
-
+        
+        # [Step 2.0] Decide whether to patch perturbation to anchor.
         if apply_patch:
             assert patch_after in ['perturbator', 'positive_augmentor'], \
             "patch after 'perturbator' or 'positive_augmentor'"
 
+        # [Case 1] patch perturbation -> pass through positive augmentor.
         if (apply_patch and patch_after == 'perturbator'):
-            negative_pairs_without_patch = negative_pairs
-            negative_pairs = negative_pairs.detach().cpu().numpy()
-            negative_pairs_temp = np.empty_like(negative_pairs)
+            # Patch perturbation
+            negative_pairs_before_patch = negative_pairs.detach().cpu().numpy()
+            negative_pairs_patched = np.empty_like(negative_pairs)
 
             for i in range(len(anchors)):
                 anchor = self.anchors[i]
-                negative_pair = negative_pairs[i]
+                negative_pair_before_patch = negative_pairs_before_patch[i]
                 amplitude_list = []
                 amplitude_pert_list = []
 
                 for dim in range(data_dim):
                     x_d = anchor[..., dim]
-                    x_pert_d = negative_pair[..., dim]
+                    x_pert_d = negative_pair_before_patch[..., dim]
                     
                     amplitude_d = np.max(x_d) - np.min(x_d)
                     amplitude_pert_d = np.max(x_pert_d) - np.min(x_pert_d)
@@ -521,9 +707,9 @@ class PretextDataset(object):
                     amplitude_list.append(amplitude_d)
                     amplitude_pert_list.append(amplitude_pert_d)
                 
-                negative_pairs_temp[i] = patch(
+                negative_pairs_patched[i] = patch(
                     x=anchor,
-                    x_pert=negative_pair,
+                    x_pert=negative_pair_before_patch,
                     amplitude_list=amplitude_list,
                     amplitude_pert_list=amplitude_pert_list,
                     deviation_mode=deviation_mode,
@@ -531,48 +717,70 @@ class PretextDataset(object):
                     constant_dim_tau=constant_dim_tau,
                 )
             
-            negative_pairs = negative_pairs_temp
-            
-            negative_loader = DataLoader(
-                dataset=negative_pairs,
-                batch_size=len(negative_pairs),
+            # Pass through positive augmentor.
+            negative_patched_loader = DataLoader(
+                dataset=negative_pairs_patched,
+                batch_size=positive_augmentor_loader_batch_size,
                 shuffle=False,
             )
 
-            negative_pairs = next(iter(negative_loader)).to(processor)
-            assert len(negative_pairs) == len(self.anchors), \
-            f"len(negative_pairs) {len(anchors)} != len(self.anchors) {len(self.anchors)}"
+            negative_finals = torch.empty(1, window_size, data_dim).to(processor)
 
-            negative_pairs_without_patch = positive_augmentor.forward(
-                x=negative_pairs_without_patch,
-                causality_matrix=causality_matrix,
-            ).detach().cpu().numpy()
-        
-            negative_pairs = positive_augmentor.forward(
-                x=negative_pairs,
-                causality_matrix=causality_matrix,
-            ).detach().cpu().numpy()
+            for negative_patched in tqdm(negative_patched_loader):
+                negative_patched: Tensor = negative_patched.to(processor)
+                negative_final = positive_augmentor.forward(
+                    x=negative_patched,
+                    causality_matrix=causality_matrix,
+                ).detach()
+                negative_finals = torch.cat(
+                    tensors=[negative_finals, negative_final],
+                    dim=0,
+                )
+            
+            self.negative_pairs = negative_finals[1:, :, :].cpu().numpy()
+            assert self.negative_pairs.shape == self.anchors.shape, \
+            "negative pairs length and anchors length mismatch"
 
-            self.negative_pairs = negative_pairs
-            negative_pairs_with_patch = negative_pairs
-
+        # [Case 2] Pass through positive augmentor -> apply patch.
         elif (apply_patch and patch_after == 'positive_augmentor'):
-            negative_pairs = positive_augmentor.forward(
-                x=negative_pairs,
-                causality_matrix=causality_matrix,
-            ).detach().cpu().numpy()
-            negative_pairs_without_patch = negative_pairs
-            negative_pairs_temp = np.empty_like(negative_pairs)
+            # Pass through positive augmentor.
+            negative_pairs_before_patch = negative_pairs.detach().cpu().numpy()
 
-            for i in range(len(anchors)):
+            negative_pairs_before_patch_loader = DataLoader(
+                dataset=negative_pairs_before_patch,
+                batch_size=positive_augmentor_loader_batch_size,
+                shuffle=False,
+            )
+
+            negatives_before_patch = torch.empty(1, window_size, data_dim).to(processor)
+
+            for negative_before_patch in tqdm(negative_pairs_before_patch_loader):
+                negative_before_patch: Tensor = negative_before_patch.to(processor)
+                negative_before_patch = positive_augmentor.forward(
+                    x=negative_before_patch,
+                    causality_matrix=causality_matrix,
+                ).detach()
+                negatives_before_patch \
+                = torch.cat(
+                    tensors=[negatives_before_patch, negative_before_patch],
+                    dim=0,
+                )
+            
+            negatives_before_patch = negatives_before_patch[1:, :, :]
+            negatives_before_patch = negatives_before_patch.cpu().numpy()
+
+            negative_finals = np.empty_like(self.anchors)
+
+            # Apply patch.
+            for i in range(len(self.anchors)):
                 anchor = self.anchors[i]
-                negative_pair = negative_pairs[i]
+                negative_before_patch = negatives_before_patch[i]
                 amplitude_list = []
                 amplitude_pert_list = []
 
                 for dim in range(data_dim):
                     x_d = anchor[..., dim]
-                    x_pert_d = negative_pair[..., dim]
+                    x_pert_d = negative_before_patch[..., dim]
                     
                     amplitude_d = np.max(x_d) - np.min(x_d)
                     amplitude_pert_d = np.max(x_pert_d) - np.min(x_pert_d)
@@ -580,9 +788,9 @@ class PretextDataset(object):
                     amplitude_list.append(amplitude_d)
                     amplitude_pert_list.append(amplitude_pert_d)
                 
-                negative_pairs_temp[i] = patch(
+                negative_finals[i] = patch(
                     x=anchor,
-                    x_pert=negative_pair,
+                    x_pert=negative_before_patch,
                     amplitude_list=amplitude_list,
                     amplitude_pert_list=amplitude_pert_list,
                     deviation_mode=deviation_mode,
@@ -590,16 +798,144 @@ class PretextDataset(object):
                     constant_dim_tau=constant_dim_tau,
                 )
             
-            self.negative_pairs = negative_pairs_temp
-            negative_pairs_with_patch = negative_pairs_temp
-        
-        else:
-            self.negative_pairs = positive_augmentor.forward(
-                x=negative_pairs,
-                causality_matrix=causality_matrix,
-            ).detach().cpu().numpy()
-            negative_pairs_without_patch = self.negative_pairs
+            self.negative_pairs = negative_finals
 
+            assert self.negative_pairs.shape == self.anchors.shape, \
+            "negative pairs length and anchors length mismatch"
+        
+        # [Case 3] Not apply patch. Perturbations without patch is in this
+        #          dataset if you want to plot perturbations.
+        else:
+            negative_pairs_before_positive_augmentor \
+            = negative_pairs.detach().cpu().numpy()
+
+            negative_before_positive_augmentor_loader = DataLoader(
+                dataset=negative_pairs_before_positive_augmentor,
+                batch_size=positive_augmentor_loader_batch_size,
+                shuffle=False,
+            )
+
+            negative_finals = torch.empty(1, window_size, data_dim).to(processor)
+
+            for negative in negative_before_positive_augmentor_loader:
+                negative: Tensor = negative.to(processor)
+                negative_final = positive_augmentor.forward(
+                    x=negative,
+                    causality_matrix=causality_matrix,
+                ).detach()
+                negative_finals = torch.cat(
+                    tensors=[negative_finals, negative_final],
+                    dim=0,
+                )
+            
+            self.negative_pairs = negative_finals[1:, :, :].cpu().numpy()
+
+            assert self.negative_pairs.shape == self.anchors.shape, \
+            "negative pairs length and anchors length mismatch"
+        
+        # For plotting un-patched perturbations.
+        if plot_perturbations:
+            negative_pairs_before_positive_augmentor \
+            = negative_pairs.detach().cpu().numpy()
+
+            negative_before_positive_augmentor_loader = DataLoader(
+                dataset=negative_pairs_before_positive_augmentor,
+                batch_size=positive_augmentor_loader_batch_size,
+                shuffle=False,
+            )
+
+            negative_finals = torch.empty(1, window_size, data_dim).to(processor)
+
+            for negative in negative_before_positive_augmentor_loader:
+                negative: Tensor = negative.to(processor)
+                negative_final = positive_augmentor.forward(
+                    x=negative,
+                    causality_matrix=causality_matrix,
+                ).detach()
+                negative_finals = torch.cat(
+                    tensors=[negative_finals, negative_final],
+                    dim=0,
+                )
+            
+            self.perturbations_without_patch \
+            = negative_finals[1:, :, :].cpu().numpy()
+        
+            assert self.perturbations_without_patch.shape == self.anchors.shape, \
+            "perturbations without patch length and anchors length mismatch"
+        
+        # Make second negative pairs?
+        if make_second_negative_pair:
+            negative_augmentor = NegativeAugmentor(
+                noise_injection_step=noise_injection_step,
+                prediction_step=pretidction_step,
+                noise_level=0.1,
+                window_size=window_size,
+                n_nodes=n_nodes,
+                causality_distort=causality_distort,
+                noise_more=negative_augmentor_noise_more,
+                noise_type=negative_augmentor_noise_type,
+            )
+            negative_augmentor.init_causal_discoverer(
+                time=positive_augmentor_time,
+                data=data,
+                subdata=subdata,
+                seed=seed,
+            )
+            negative_augmentor = negative_augmentor.to(processor)
+            causality_matrix \
+            = negative_augmentor.causal_discoverer.causality_mtx
+            negative_augmentor.eval()
+
+            negative_augmentor_loader = DataLoader(
+                dataset=self.anchors,
+                batch_size=negative_augmentor_loader_batch_size,
+                shuffle=False,
+            )
+
+            second_negative_pairs = torch.empty(1, window_size, data_dim).to(processor)
+
+            for anchor in tqdm(negative_augmentor_loader):
+                anchor: Tensor = anchor.to(processor)
+                second_negative_pair = negative_augmentor.forward(
+                    x=anchor,
+                    causality_matrix=causality_matrix,
+                ).detach()
+                second_negative_pairs = torch.cat(
+                    tensors=[second_negative_pairs, second_negative_pair],
+                    dim=0,
+                )
+            
+            self.second_negative_pairs \
+            = second_negative_pairs[1:, :, :].cpu().numpy()
+
+            assert self.second_negative_pairs.shape == self.anchors.shape, \
+            "second negative pairs length and anchors length mismatch"
+
+            if mix_negative_pairs:
+                second_negative_pair_num = int(
+                    len(anchors) * second_negative_pair_ratio
+                )
+
+                indices = np.random.permutation(len(anchors))
+
+                first_negative_pairs_idx \
+                = indices[:second_negative_pair_num]
+                second_negative_pairs_idx \
+                = indices[second_negative_pair_num:]
+
+                negative_pairs_mixed = np.empty_like(self.negative_pairs)
+
+                for idx in first_negative_pairs_idx:
+                    negative_pairs_mixed[idx] = self.negative_pairs[idx]
+                
+                for idx in second_negative_pairs_idx:
+                    negative_pairs_mixed[idx] = self.second_negative_pairs[idx]
+                
+                self.negative_pairs_mixed = negative_pairs_mixed
+
+                assert self.negative_pairs_mixed.shape == self.anchors.shape, \
+                "negative pairs length and anchors length mismatch"
+                
         classification_data_save_dir = os.path.join(
             'exp', 'data', 'classification_data', data
         )
@@ -612,85 +948,129 @@ class PretextDataset(object):
         os.makedirs(classification_data_save_dir, exist_ok=True)
 
         if save_negative_pairs:
-            np.save(
-                file=os.path.join(
-                    classification_data_save_dir, f'negative_pairs_{time}.npy'
-                ),
-                arr=self.negative_pairs,
-            )
+            self.save_negative_pairs()
         
-        if plot_perturbation:
-            plot_dir = os.path.join(os.getcwd(), 'plots', data)
-
-            if apply_patch:
-                plot_dir = os.path.join(
-                    plot_dir,
-                    f'patch_after_{patch_after}',
-                    f'nonconstant_dim_tau_{non_constant_dim_tau}',
-                    f'constant_dim_tau_{constant_dim_tau}'
-                )
-            
-            if subdata is not None:
-                plot_dir = os.path.join(plot_dir, subdata)
-            
-            os.makedirs(plot_dir, exist_ok=True)
-
-            num_cols = 5
-            num_rows = data_dim // num_cols
-
-            if data_dim % num_cols != 0:
-                num_rows = (data_dim // num_cols) + 1
-
-            for i in range(len(self.anchors)//window_size):
-                len_ratio = int(num_rows // num_cols)
-                
-                if num_rows % num_cols != 0:
-                    len_ratio = int(num_rows // num_cols) + 1
-                
-                figsize = (20, 10*len_ratio)
-                
-                fig, ax = plt.subplots(num_rows, num_cols, figsize=figsize)
-                idx = i * window_size
-
-                for j in range(0, data_dim):
-                    ax[j//5, j%5].plot(
-                        self.anchors[idx][:, j],
-                        color='red',
-                        linestyle='--',
-                        label='anchor',
-                    )
-                    ax[j//5, j%5].plot(
-                        negative_pairs_without_patch[idx][:, j],
-                        color='blue',
-                        linestyle=':',
-                        label='negative pair without patch',
-                    )
-                    if apply_patch:
-                        ax[j//5, j%5].plot(
-                            negative_pairs_with_patch[idx][:, j],
-                            color='green',
-                            label='negative pair with patch',
-                        )
-                
-                handles, labels = ax[0, 0].get_legend_handles_labels()
-                fig.legend(handles, labels, loc='upper right')
-                fig.savefig(
-                    os.path.join(plot_dir, f'comparison_patch_{idx}.png')
-                )
-                plt.close()
-    
+        if plot_perturbations:
+            self.plot_perturbations()
+        
         return
     
+    def save_negative_pairs(self) -> None:
+        classification_data_save_dir = os.path.join(
+            'exp', 'data', 'classification_data', self.data
+        )
+
+        if self.data in ['MSL', 'SMAP', 'SMD']:
+            classification_data_save_dir = os.path.join(
+                classification_data_save_dir, self.subdata
+            )
+        
+        os.makedirs(classification_data_save_dir, exist_ok=True)
+
+        np.save(
+            file=os.path.join(
+                classification_data_save_dir, f'negative_pairs_{self.time}.npy'
+            ),
+            arr=self.negative_pairs,
+        )
+
+        return
+        
+    def plot_perturbations(self) -> None:
+        print('Plotting perturbations')
+        plot_dir = os.path.join(os.getcwd(), 'plots', self.data)
+
+        if self.apply_patch:
+            plot_dir = os.path.join(
+                plot_dir,
+                f'patch_after_{self.patch_after}',
+                f'nonconstant_dim_tau_{self.non_constant_dim_tau}',
+                f'constant_dim_tau_{self.constant_dim_tau}'
+            )
+        
+        if self.subdata is not None:
+            plot_dir = os.path.join(plot_dir, self.subdata)
+        
+        os.makedirs(plot_dir, exist_ok=True)
+
+        num_cols = 5
+        num_rows = self.data_dim // num_cols
+
+        if self.data_dim % num_cols != 0:
+            num_rows = (self.data_dim // num_cols) + 1
+
+        for i in tqdm(range(len(self.anchors)//self.window_size)):
+            len_ratio = int(num_rows // num_cols)
+            
+            if num_rows % num_cols != 0:
+                len_ratio = int(num_rows // num_cols) + 1
+            
+            figsize = (20, 10*len_ratio)
+            
+            fig, ax = plt.subplots(num_rows, num_cols, figsize=figsize)
+            idx = i * self.window_size
+
+            for j in range(0, self.data_dim):
+                ax[j//5, j%5].plot(
+                    self.anchors[idx][:, j],
+                    color='red',
+                    linestyle='--',
+                    label='anchor',
+                )
+                ax[j//5, j%5].plot(
+                    self.perturbations_without_patch[idx][:, j],
+                    color='blue',
+                    linestyle=':',
+                    label='negative pair without patch',
+                )
+
+                if self.apply_patch:
+                    ax[j//5, j%5].plot(
+                        self.negative_pairs[idx][:, j],
+                        color='green',
+                        label='negative pair with patch',
+                    )
+                
+                if self.make_second_negative_pair:
+                    ax[j//5, j%5].plot(
+                        self.second_negative_pairs[idx][:, j],
+                        color='green',
+                        label='negative pair with patch',
+                    )
+            
+            handles, labels = ax[0, 0].get_legend_handles_labels()
+            fig.legend(handles, labels, loc='upper right')
+            fig.savefig(
+                os.path.join(plot_dir, f'comparison_patch_{idx}.png')
+            )
+            plt.close()
+
+        return
         
     def __len__(self) -> int:
         return self.anchors.shape[0]
 
-    def __getitem__(self, idx: int) -> Tuple[Matrix, Matrix, Matrix]:
+    def __getitem__(
+        self,
+        idx: int
+    ) -> Union[
+        Tuple[Matrix, Matrix, Matrix],
+        Tuple[Matrix, Matrix, Matrix, Matrix],
+    ]:
         anchor = self.anchors[idx]
         positive_pair = self.positive_pairs[idx]
         negaitve_pair = self.negative_pairs[idx]
 
-        return anchor, positive_pair, negaitve_pair
+        if self.make_second_negative_pair:
+            if self.mix_negative_pairs:
+                negative_pair = self.negative_pairs_mixed[idx]
+                return anchor, positive_pair, negative_pair
+            else:
+                second_negative_pair = self.second_negative_pairs[idx]
+                return anchor, positive_pair, \
+                       negative_pair, second_negative_pair
+        else:
+            return anchor, positive_pair, negaitve_pair
 
 
 class ClassificationDatasaet(object):
@@ -728,7 +1108,7 @@ class ClassificationDatasaet(object):
             test_data = pd.read_csv(os.path.join(data_path, 'swat2.csv'))
 
             test_labels = test_data.iloc[1:, -1] == 1
-            test_labels = test_data.to_numpy().astype(int)
+            test_labels = test_labels.to_numpy().astype(int)
 
             test_data = test_data.iloc[1: 1:-1].to_numpy()
         

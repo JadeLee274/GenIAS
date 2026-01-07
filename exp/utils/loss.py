@@ -38,10 +38,12 @@ class DiscriminatorLoss:
         negative_pseudo_label: Tensor,
     ) -> Tuple[Tensor, float, float]:
         batch_size = positive_pseudo_label.shape[0]
-        negative_label = torch.zeros(batch_size, 1).to(positive_pseudo_label.device)
-        positive_label = torch.ones(batch_size, 1).to(negative_pseudo_label.device)
+        negative_label = torch.zeros(batch_size, 1).to(negative_pseudo_label.device)
+        positive_label = torch.ones(batch_size, 1).to(positive_pseudo_label.device)
+        
         negative_bce = self.bce.forward(negative_pseudo_label, negative_label)
         positive_bce = self.bce.forward(positive_pseudo_label, positive_label)
+        
         total_bce = negative_bce + positive_bce
         return total_bce, negative_bce.item(), positive_bce.item()
     

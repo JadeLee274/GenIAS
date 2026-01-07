@@ -41,7 +41,7 @@ class PLAD(nn.Module):
         epoch: int,
     ) -> None:
         ckpt_dir = os.path.join('exp', 'checkpoints', data)
-
+        
         if subdata is not None:
             ckpt_dir = os.path.join(ckpt_dir, subdata)
         
@@ -68,6 +68,63 @@ class Discriminator(nn.Module):
         label: Tensor = self.fc.forward(x)
         label = label.mean(dim=1)
         return label
+
+    def init_discriminator(
+        self,
+        time: str,
+        data: str,
+        subdata: str,
+        epoch: int,
+    ) -> None:
+        ckpt_dir = os.path.join('exp', 'checkpoints', data)
+
+        if subdata is not None:
+            ckpt_dir = os.path.join(ckpt_dir, subdata)
+        
+        ckpt_dir = os.path.join(
+            ckpt_dir, 'perturbator', time, f'epoch_{epoch}.pt'
+        )
+        ckpt = torch.load(ckpt_dir)
+        self.load_state_dict(ckpt['discriminator'])
+        self.seed = ckpt['seed']
+
+        return
+
+
+class Discriminator2(nn.Module):
+    """
+    Temporary discriminator for SWaT and WADI
+    """
+    def __init__(self, data_dim: int) -> None:
+        super().__init__()
+        self.fc = nn.Linear(in_features=data_dim, out_features=1)
+        return
+    
+    def forward(self, x: Tensor) -> Tensor:
+        label: Tensor = self.fc.forward(x)
+        label = label.mean(dim=1)
+        return label
+
+    def init_discriminator(
+        self,
+        time: str,
+        data: str,
+        subdata: str,
+        epoch: int,
+    ) -> None:
+        ckpt_dir = os.path.join('exp', 'checkpoints', data)
+
+        if subdata is not None:
+            ckpt_dir = os.path.join(ckpt_dir, subdata)
+        
+        ckpt_dir = os.path.join(
+            ckpt_dir, 'perturbator', time, f'epoch_{epoch}.pt'
+        )
+        ckpt = torch.load(ckpt_dir)
+        self.load_state_dict(ckpt['discriminator'])
+        self.seed = ckpt['seed']
+
+        return
 
 
 class TCNPerturbator(nn.Module):
