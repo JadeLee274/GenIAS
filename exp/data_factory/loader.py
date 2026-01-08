@@ -429,8 +429,13 @@ class NegativeAugmentor(nn.Module):
         
         perturbed_causality_matrix = (perturbed_causality_matrix > 0.5).int()
 
-        start_node = random.choice(range(len(perturbed_causality_matrix)))
-        self.start_node = start_node
+        # If we random choise, then effects can be [0, 0, 0, ..., 0], 
+        # making the positive pair meaningless...
+        start_node = random.choice(range(len(causality_matrix)))
+
+        # So we choose start node as follows, so that the effects
+        # have as many 1's as possible.
+        start_node = causality_matrix.sum(dim=1).argmax().item()
         
         effects = [
             i for i, val in enumerate(perturbed_causality_matrix[start_node]) if val == 1
@@ -496,6 +501,7 @@ class PretextDataset(object):
         downsample_step: int,
         apply_patch: bool,
         patch_after: str,
+        constant_dim_amplitude_method: str,
         deviation_mode: str,
         non_constant_dim_tau: float,
         constant_dim_tau: float,
@@ -508,6 +514,9 @@ class PretextDataset(object):
         assert causality_distort in ['perturb', 'reverse'], \
         "causality_distort has to be either 'perturb' or 'reverse'"
 
+        assert 0 <= second_negative_pair_ratio and second_negative_pair_ratio <=1, \
+        "0 <= second_negative_pair_ratio <= 1"
+
         self.time = time
         self.data = data
         self.subdata = subdata
@@ -515,6 +524,7 @@ class PretextDataset(object):
         self.mix_negative_pairs = mix_negative_pairs
         self.apply_patch = apply_patch
         self.patch_after = patch_after
+        self.constant_dim_amplitude_method = constant_dim_amplitude_method
         self.non_constant_dim_tau = non_constant_dim_tau
         self.constant_dim_tau = constant_dim_tau
 
@@ -783,7 +793,11 @@ class PretextDataset(object):
                     x_pert_d = negative_before_patch[..., dim]
                     
                     amplitude_d = np.max(x_d) - np.min(x_d)
-                    amplitude_pert_d = np.max(x_pert_d) - np.min(x_pert_d)
+
+                    if constant_dim_amplitude_method == 'inside':
+                        amplitude_pert_d = np.max(x_pert_d) - np.min(x_pert_d)
+                    elif constant_dim_amplitude_method == 'inter':
+                        amplitude_pert_d = np.max(np.abs(x_pert_d - x_d))
 
                     amplitude_list.append(amplitude_d)
                     amplitude_pert_list.append(amplitude_pert_d)
@@ -985,7 +999,8 @@ class PretextDataset(object):
                 plot_dir,
                 f'patch_after_{self.patch_after}',
                 f'nonconstant_dim_tau_{self.non_constant_dim_tau}',
-                f'constant_dim_tau_{self.constant_dim_tau}'
+                f'constant_dim_tau_{self.constant_dim_tau}',
+                f'constant_dim_amplitude_by_{self.constant_dim_amplitude_method}',
             )
         
         if self.subdata is not None:

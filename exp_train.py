@@ -29,6 +29,7 @@ def main(
     seed: int,
     apply_patch: bool,
     patch_after: str,
+    constant_dim_amplitude_method: str,
     deviation_mode: str,
     non_constant_dim_tau: float,
     constant_dim_tau: float,
@@ -225,6 +226,9 @@ def main(
 
             if apply_patch:
                 logging.info(f'- Patch after: {patch_after}')
+                logging.info(
+                    f'- Constant dim amplitude method: {constant_dim_amplitude_method}'
+                )
                 logging.info(f'- Deviation mode: {deviation_mode}')
                 logging.info(f'- Non-constant dim tau: {non_constant_dim_tau}')
                 logging.info(f'- Constant dim tau: {constant_dim_tau}')
@@ -258,6 +262,7 @@ def main(
             num_neighborhoods=5,
             apply_patch=apply_patch,
             patch_after=patch_after,
+            constant_dim_amplitude_method=constant_dim_amplitude_method,
             deviation_mode=deviation_mode,
             non_constant_dim_tau=non_constant_dim_tau,
             constant_dim_tau=constant_dim_tau,
@@ -356,6 +361,7 @@ def main(
             num_neighborhoods=5,
             apply_patch=apply_patch,
             patch_after=patch_after,
+            constant_dim_amplitude_method=constant_dim_amplitude_method,
             deviation_mode=deviation_mode,
             non_constant_dim_tau=non_constant_dim_tau,
             constant_dim_tau=constant_dim_tau,
@@ -473,7 +479,7 @@ if __name__ == '__main__':
         '--perturbator-epoch',
         type=int,
         default=50,
-        help="The epoch of pre-trained perturbator. Default 50."
+        help="The epoch of pre-trained perturbator. Default 50.",
     )
     args.add_argument(
         '--positive-augmentor-noise-more',
@@ -497,7 +503,7 @@ if __name__ == '__main__':
         help="How to perturb causality matrix for second negative pair." \
              "If 'perturb', then some values are added to causality matrix." \
              "If 'reverse', then the matrix is subtracted from 1," \
-             "              and the binary mask is applied."
+             "              and the binary mask is applied.",
     )
     args.add_argument(
         '--negative-augmentor-noise-more',
@@ -525,14 +531,14 @@ if __name__ == '__main__':
     args.add_argument(
         '--second-negative-pair-ratio',
         type=float,
-        help="Ratio of second negatve pairs when mixing negative pairs." \
+        help="Ratio of second negatve pairs when mixing negative pairs.",
     )
     args.add_argument(
         '--use-infonce-loss',
         type=str2bool,
         default=False,
         help="Use InfoNCE loss when using two negative pairs per anchor." \
-             "Default False."
+             "Default False.",
     )
     args.add_argument(
         '--positive-augmentor-time',
@@ -548,7 +554,7 @@ if __name__ == '__main__':
         '--downsample',
         type=str2bool,
         default=False,
-        help="Whether to downsample data or not. Default False."
+        help="Whether to downsample data or not. Default False.",
     )
     args.add_argument(
         '--downsample-step',
@@ -566,13 +572,20 @@ if __name__ == '__main__':
         '--patch-after',
         type=str,
         default='positive_augmentor',
-        help="Patch will be applied after perturbator or positive_augmentor."
+        help="Patch will be applied after perturbator or positive_augmentor.",
+    )
+    args.add_argument(
+        '--constant-dim-amplitude-method',
+        type=str,
+        choices=['inside', 'inter'],
+        default='inside',
+        help="How the constant dimension will be patched. Default 'inside'.",
     )
     args.add_argument(
         '--deviation-mode',
         type=str,
         default='abs',
-        help="The mode of deviation for patching. Default 'abs'."
+        help="The mode of deviation for patching. Default 'abs'.",
     )
     args.add_argument(
         '--non-constant-dim-tau',
@@ -582,12 +595,12 @@ if __name__ == '__main__':
     args.add_argument(
         '--constant-dim-tau',
         type=float,
-        help="Determines threshold when applying patch to constant dim."
+        help="Determines threshold when applying patch to constant dim.",
     )
     args.add_argument(
         '--want-time',
         type=str,
-        help="Time that you want to replace for some purpose."
+        help="Time that you want to replace for some purpose.",
     )
     config = args.parse_args()
 
@@ -675,6 +688,7 @@ if __name__ == '__main__':
                         seed=config.seed,
                         apply_patch=config.apply_patch,
                         patch_after=config.patch_after,
+                        constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                         deviation_mode=config.deviation_mode,
                         non_constant_dim_tau=config.non_constant_dim_tau,
                         constant_dim_tau=config.constant_dim_tau,
@@ -746,6 +760,7 @@ if __name__ == '__main__':
                         seed=config.seed,
                         apply_patch=config.apply_patch,
                         patch_after=config.patch_after,
+                        constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                         deviation_mode=config.deviation_mode,
                         non_constant_dim_tau=config.non_constant_dim_tau,
                         constant_dim_tau=config.constant_dim_tau,
@@ -781,6 +796,7 @@ if __name__ == '__main__':
                     seed=config.seed,
                     apply_patch=config.apply_patch,
                     patch_after=config.patch_after,
+                    constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                     deviation_mode=config.deviation_mode,
                     non_constant_dim_tau=config.non_constant_dim_tau,
                     constant_dim_tau=config.constant_dim_tau,
@@ -827,6 +843,7 @@ if __name__ == '__main__':
                     seed=config.seed,
                     apply_patch=config.apply_patch,
                     patch_after=config.patch_after,
+                    constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                     deviation_mode=config.deviation_mode,
                     non_constant_dim_tau=config.non_constant_dim_tau,
                     constant_dim_tau=config.constant_dim_tau,
@@ -862,6 +879,7 @@ if __name__ == '__main__':
                 seed=config.seed,
                 apply_patch=config.apply_patch,
                 patch_after=config.patch_after,
+                constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                 deviation_mode=config.deviation_mode,
                 non_constant_dim_tau=config.non_constant_dim_tau,
                 constant_dim_tau=config.constant_dim_tau,
@@ -909,6 +927,7 @@ if __name__ == '__main__':
                 seed=config.seed,
                 apply_patch=config.apply_patch,
                 patch_after=config.patch_after,
+                constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                 deviation_mode=config.deviation_mode,
                 non_constant_dim_tau=config.non_constant_dim_tau,
                 constant_dim_tau=config.constant_dim_tau,
