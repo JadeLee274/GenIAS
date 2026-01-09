@@ -621,7 +621,7 @@ if __name__ == '__main__':
     fix_seed_all(seed=config.seed)
     
     time = datetime.datetime.now()
-    time = time.strftime('%m%d_%H%M')
+    time = time.strftime('%Y%m%d_%H%M%S')
 
     if config.want_time is not None:
         time = config.want_time

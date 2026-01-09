@@ -344,9 +344,10 @@ class PositiveAugmentor(nn.Module):
             for time in noise_times:
                 x_positive[:, time, start_node] \
                 += torch.randn(x.size(0)).to(x.device) * self.noise_level
-            
-        # x_positive[:, self.noise_injection_step, start_node] \
-        # += torch.randn(x.size(0)).to(x.device) * self.noise_level
+        
+        else:
+            x_positive[:, self.noise_injection_step, start_node] \
+            += torch.randn(x.size(0)).to(x.device) * self.noise_level
 
         with torch.no_grad():
             graph = (self.causal_discoverer.causality_mtx > 0.5).float()
@@ -387,6 +388,8 @@ class NegativeAugmentor(nn.Module):
         self.causal_discoverer = CUTS_Plus_Net(n_nodes=n_nodes, data_dim=1)
         self.causality_distort = causality_distort
         self.noise_more = noise_more
+        assert noise_type in ['gaussian', 'constants'], \
+        "noise_type must be either 'gaussian' or 'constants'."
         self.noise_type = noise_type
         return
     
@@ -443,25 +446,25 @@ class NegativeAugmentor(nn.Module):
         self.effects = effects
 
         if self.noise_more:
-            noise_times = torch.tensor([i for i in range(self.window_size - 1)])
-            noise_num = random.choice([1, 2, 3])
+            noise_times = torch.tensor([i for i in range(self.window_size)])
+            noise_num = random.choice([2, 3, 4, 5])
             noise_idx = torch.randperm(len(noise_times))[:noise_num]
             noise_times = noise_times[noise_idx]
+
             for time in noise_times:
                 if self.noise_type == 'gaussian':
                     x_negative[:, time, start_node] \
                     += torch.randn(x.size(0)).to(x.device) * self.noise_level
-                elif self.noise_type == 'constsnts':
-                    perturb_values = torch.tensor(
-                        [-0.4 + 0.1 * i for i in range(9)]
-                    )
+                elif self.noise_type == 'constants':
+                    perturb_values = torch.linspace(-0.4, 0.4, 9)
                     perturb_vector = perturb_values[
-                        torch.randint(0, 9, x.size(0))
+                        torch.randint(0, 9, x_negative[:, time, start_node].shape)
                     ].to(x.device)
                     x_negative[:, time, start_node] += perturb_vector
-                
-        # x_negative[:, self.noise_injection_step, start_node] \
-        # += torch.randn(x.size(0)).to(x.device) * self.noise_level
+
+        else:     
+            x_negative[:, self.noise_injection_step, start_node] \
+            += torch.randn(x.size(0)).to(x.device) * self.noise_level
 
         with torch.no_grad():
             graph = (perturbed_causality_matrix > 0.5).float()
@@ -514,8 +517,9 @@ class PretextDataset(object):
         assert causality_distort in ['perturb', 'reverse'], \
         "causality_distort has to be either 'perturb' or 'reverse'"
 
-        assert 0 <= second_negative_pair_ratio and second_negative_pair_ratio <=1, \
-        "0 <= second_negative_pair_ratio <= 1"
+        if second_negative_pair_ratio is not None:
+            assert 0 <= second_negative_pair_ratio and second_negative_pair_ratio <=1, \
+            "0 <= second_negative_pair_ratio <= 1"
 
         self.time = time
         self.data = data
@@ -991,7 +995,7 @@ class PretextDataset(object):
         return
         
     def plot_perturbations(self) -> None:
-        print('Plotting perturbations')
+        print(f'Plotting perturbations: {self.data} {self.subdata}')
         plot_dir = os.path.join(os.getcwd(), 'plots', self.data)
 
         if self.apply_patch:
@@ -1032,19 +1036,19 @@ class PretextDataset(object):
                     linestyle='--',
                     label='anchor',
                 )
-                ax[j//5, j%5].plot(
-                    self.perturbations_without_patch[idx][:, j],
-                    color='blue',
-                    linestyle=':',
-                    label='negative pair without patch',
-                )
+                # ax[j//5, j%5].plot(
+                #     self.perturbations_without_patch[idx][:, j],
+                #     color='blue',
+                #     linestyle=':',
+                #     label='negative pair without patch',
+                # )
 
-                if self.apply_patch:
-                    ax[j//5, j%5].plot(
-                        self.negative_pairs[idx][:, j],
-                        color='green',
-                        label='negative pair with patch',
-                    )
+                # if self.apply_patch:
+                #     ax[j//5, j%5].plot(
+                #         self.negative_pairs[idx][:, j],
+                #         color='green',
+                #         label='negative pair with patch',
+                #     )
                 
                 if self.make_second_negative_pair:
                     ax[j//5, j%5].plot(
