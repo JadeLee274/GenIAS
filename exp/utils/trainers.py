@@ -928,10 +928,11 @@ class PretextTrainer(object):
         num_neighborhoods: int,
         apply_patch: bool,
         patch_after: str,
+        dropout_perturbations: bool,
         constant_dim_amplitude_method: str,
         deviation_mode: str,
-        non_constant_dim_tau: float,
-        constant_dim_tau: float,
+        non_constant_dim_tau_base: float,
+        constant_dim_tau_base: float,
     ) -> None:
         assert perturbator_mode in ['plad', 'tcn_perturbator'] ,\
         "perturbator_mode has to be either 'plad' or 'tcn_perturbator'"
@@ -967,10 +968,11 @@ class PretextTrainer(object):
             downsample_step=downsample_step,
             apply_patch=apply_patch,
             patch_after=patch_after,
+            dropout_perturbations=dropout_perturbations,
             constant_dim_amplitude_method=constant_dim_amplitude_method,
             deviation_mode=deviation_mode,
-            non_constant_dim_tau=non_constant_dim_tau,
-            constant_dim_tau=constant_dim_tau,
+            non_constant_dim_tau_base=non_constant_dim_tau_base,
+            constant_dim_tau_base=constant_dim_tau_base,
             save_negative_pairs=True,
             plot_perturbations=False,
         )

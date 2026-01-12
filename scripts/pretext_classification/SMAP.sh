@@ -1,0 +1,12 @@
+python exp_train.py --exp-name "pretext_classification with PLAD" \
+                    --task pretext_classification \
+                    --data SMAP \
+                    --positive-augmentor-time 1217_2229 \
+                    --perturbator-time 0107_0529 \
+                    --constant-dim-amplitude-method inter \
+                    --deviation-mode abs \
+                    --non-constant-dim-tau 0.1 \
+                    --constant-dim-tau 0.9 \
+                    --perturbator-mode plad \
+                    --positive-augmentor-noise-more True \
+                    --seed 369

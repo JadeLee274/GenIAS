@@ -1,0 +1,1 @@
+python exp_train.py --exp-name "PLAD SMD" --task plad --data SMD --epochs 50 --save-interval 2 --seed 369

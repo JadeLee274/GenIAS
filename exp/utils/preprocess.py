@@ -72,14 +72,15 @@ def patch(
     deviation_mode: str,
     non_constant_dim_tau: float,
     constant_dim_tau: float,
+    dropout_perturbations: bool,
 ) -> Matrix:
     data_dim = x.shape[-1]
-    x_pert_temp = np.empty_like(x)
+    x_patch = np.empty_like(x)
 
     for dim in range(data_dim):
         x_d = x[:, dim]
         x_pert_d = x_pert[:, dim]
-        x_pert_temp_d = x_pert_temp[:, dim]
+        x_patch_d = x_patch[:, dim]
         amplitude_d = amplitude_list[dim]
         amplitude_pert_d = amplitude_pert_list[dim]
 
@@ -97,14 +98,20 @@ def patch(
             # Patching on non-constant dimension
             if amplitude_d != 0:
                 if deviation > non_constant_dim_tau * amplitude_d:
-                    x_pert_temp_d[i] = point_i_pert
+                    x_patch_d[i] = point_i_pert
                 else:
-                    x_pert_temp_d[i] = point_i
+                    x_patch_d[i] = point_i
             # Patching on constant dimension
             elif amplitude_d == 0:
                 if deviation > constant_dim_tau * amplitude_pert_d:
-                    x_pert_temp_d[i] = point_i_pert
+                    x_patch_d[i] = point_i_pert
                 else:
-                    x_pert_temp_d[i] = point_i
+                    x_patch_d[i] = point_i
     
-    return x_pert_temp
+    if dropout_perturbations:
+        dropout_dims = np.random.permutation(data_dim)
+        num_dropout = np.random.choice(data_dim)
+        dropout_dims = dropout_dims[:num_dropout]
+        x_patch[:, dropout_dims] = x[:, dropout_dims]
+    
+    return x_patch

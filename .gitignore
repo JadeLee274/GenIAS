@@ -26,7 +26,7 @@ plots/
 practice/
 results_npz/
 save/
-scripts/
+# scripts/
 temp/
 temp_checkpoints/
 temp_classification/

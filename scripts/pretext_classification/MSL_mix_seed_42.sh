@@ -1,0 +1,19 @@
+python exp_train.py --exp-name "pretext_classification with PLAD, mix negative pairs" \
+                    --task pretext_classification \
+                    --data MSL \
+                    --positive-augmentor-time 1212_0226 \
+                    --perturbator-time 0106_0409 \
+                    --constant-dim-amplitude-method inter \
+                    --dropout-perturbations True \
+                    --deviation-mode abs \
+                    --non-constant-dim-tau-base 0.3 \
+                    --constant-dim-tau-base 0.9 \
+                    --perturbator-mode plad \
+                    --positive-augmentor-noise-more True \
+                    --make-second-negative-pair True \
+                    --causality-distort perturb \
+                    --negative-augmentor-noise-more True \
+                    --negative-augmentor-noise-type constants \
+                    --mix-negative-pairs True \
+                    --second-negative-pair-ratio 1.0 \
+                    --seed 42

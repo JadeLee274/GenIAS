@@ -1,0 +1,34 @@
+   MSL       positive_augmentor_time  perturbator_time
+seed   1:         1217_1743              0105_2006
+seed  42:         1212_0226              0106_0409
+seed 124:         1217_1745              0106_0740
+seed 256:         1217_1746              0106_1129
+seed 369:         1217_1747              0106_1521
+
+   SMAP     positive_augmentor_time  perturbator_time
+seed   1:         1217_2225              0105_2008
+seed  42:         1217_2226              0106_0731
+seed 124:         1217_2227              0106_1439
+seed 256:         1217_2228              0106_2249
+seed 369:         1217_2229              0107_0529
+
+   SMD     positive_augmentor_time  perturbator_time
+seed   1:         1218_0646              0105_2008
+seed  42:         1218_0647              0107_2054
+seed 124:         1218_0648              0107_2055
+seed 256:         1218_0649              
+seed 369:         1218_0650
+
+   SWaT     positive_augmentor_time  perturbator_time
+seed   1:         1231_0529              0107_1422
+seed  42:         1223_2225              0107_1843
+seed 124:         1231_0531              0108_0110
+seed 256:         1231_0532              0108_0950
+seed 369:         1231_0533              0108_1653
+
+   WADI     positive_augmentor_time  perturbator_time
+seed   1:         1231_0534              0107_1608
+seed  42:         1223_2242              0107_2309
+seed 124:         1231_0536              0108_0926
+seed 256:         
+seed 369:         

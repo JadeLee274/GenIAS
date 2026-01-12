@@ -29,10 +29,11 @@ def main(
     seed: int,
     apply_patch: bool,
     patch_after: str,
+    dropout_perturbations: bool,
     constant_dim_amplitude_method: str,
     deviation_mode: str,
-    non_constant_dim_tau: float,
-    constant_dim_tau: float,
+    non_constant_dim_tau_base: float,
+    constant_dim_tau_base: float,
 ) -> Union[None, Tuple[float, float, float, float, float, float]]:
     assert task in [
         'cuts_plus',
@@ -230,9 +231,10 @@ def main(
                     f'- Constant dim amplitude method: {constant_dim_amplitude_method}'
                 )
                 logging.info(f'- Deviation mode: {deviation_mode}')
-                logging.info(f'- Non-constant dim tau: {non_constant_dim_tau}')
-                logging.info(f'- Constant dim tau: {constant_dim_tau}')
-                
+                logging.info(f'- Non-constant dim tau base: {non_constant_dim_tau_base}')
+                logging.info(f'- Constant dim tau base: {constant_dim_tau_base}')
+            
+            logging.info(f'- Dropout perturbations: {dropout_perturbations}')
             logging.info(f'- Seed: {seed}\n')
         
         pretext_trainer = PretextTrainer(
@@ -262,10 +264,11 @@ def main(
             num_neighborhoods=5,
             apply_patch=apply_patch,
             patch_after=patch_after,
+            dropout_perturbations=dropout_perturbations,
             constant_dim_amplitude_method=constant_dim_amplitude_method,
             deviation_mode=deviation_mode,
-            non_constant_dim_tau=non_constant_dim_tau,
-            constant_dim_tau=constant_dim_tau,
+            non_constant_dim_tau_base=non_constant_dim_tau_base,
+            constant_dim_tau_base=constant_dim_tau_base,
         )
         
         pretext_trainer.train()
@@ -363,8 +366,8 @@ def main(
             patch_after=patch_after,
             constant_dim_amplitude_method=constant_dim_amplitude_method,
             deviation_mode=deviation_mode,
-            non_constant_dim_tau=non_constant_dim_tau,
-            constant_dim_tau=constant_dim_tau,
+            non_constant_dim_tau_base=non_constant_dim_tau_base,
+            constant_dim_tau_base=constant_dim_tau_base,
         )
         pretext_trainer.train()
         pretext_trainer.select_neighbors()
@@ -575,6 +578,12 @@ if __name__ == '__main__':
         help="Patch will be applied after perturbator or positive_augmentor.",
     )
     args.add_argument(
+        '--dropout-perturbations',
+        type=str2bool,
+        default=False,
+        help="If true, some of perturbations are dropped. Default False."
+    )
+    args.add_argument(
         '--constant-dim-amplitude-method',
         type=str,
         choices=['inside', 'inter'],
@@ -588,12 +597,12 @@ if __name__ == '__main__':
         help="The mode of deviation for patching. Default 'abs'.",
     )
     args.add_argument(
-        '--non-constant-dim-tau',
+        '--non-constant-dim-tau-base',
         type=float,
         help="Determines threshold when applying patch to non-constant dim.",
     )
     args.add_argument(
-        '--constant-dim-tau',
+        '--constant-dim-tau-base',
         type=float,
         help="Determines threshold when applying patch to constant dim.",
     )
@@ -613,10 +622,10 @@ if __name__ == '__main__':
                    "positive augmentor timestamp required."
             assert config.perturbator_time is not None, \
                    "perturbator timestamp required."
-            assert config.non_constant_dim_tau is not None, \
-                   "tau for non-constant-valued dimension needed."
-            assert config.constant_dim_tau is not None, \
-                   "tau for constant-valued dimension needed."
+            assert config.non_constant_dim_tau_base is not None, \
+                   "base tau for non-constant-valued dimension needed."
+            assert config.constant_dim_tau_base is not None, \
+                   "base tau for constant-valued dimension needed."
     
     fix_seed_all(seed=config.seed)
     
@@ -688,10 +697,11 @@ if __name__ == '__main__':
                         seed=config.seed,
                         apply_patch=config.apply_patch,
                         patch_after=config.patch_after,
+                        dropout_perturbations=config.dropout_perturbations,
                         constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                         deviation_mode=config.deviation_mode,
-                        non_constant_dim_tau=config.non_constant_dim_tau,
-                        constant_dim_tau=config.constant_dim_tau,
+                        non_constant_dim_tau_base=config.non_constant_dim_tau_base,
+                        constant_dim_tau_base=config.constant_dim_tau_base,
                     )
                     f1_list.append(f1)
                     tp_list.append(tp)
@@ -760,10 +770,11 @@ if __name__ == '__main__':
                         seed=config.seed,
                         apply_patch=config.apply_patch,
                         patch_after=config.patch_after,
+                        dropout_perturbations=config.dropout_perturbations,
                         constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                         deviation_mode=config.deviation_mode,
-                        non_constant_dim_tau=config.non_constant_dim_tau,
-                        constant_dim_tau=config.constant_dim_tau,
+                        non_constant_dim_tau_base=config.non_constant_dim_tau_base,
+                        constant_dim_tau_base=config.constant_dim_tau_base,
                     )
 
         else:
@@ -796,10 +807,11 @@ if __name__ == '__main__':
                     seed=config.seed,
                     apply_patch=config.apply_patch,
                     patch_after=config.patch_after,
+                    dropout_perturbations=config.dropout_perturbations,
                     constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                     deviation_mode=config.deviation_mode,
-                    non_constant_dim_tau=config.non_constant_dim_tau,
-                    constant_dim_tau=config.constant_dim_tau,
+                    non_constant_dim_tau_base=config.non_constant_dim_tau_base,
+                    constant_dim_tau=config.constant_dim_tau_base,
                 )
                 precision = tp / (tp + fp)
                 recall = tp / (tp / fn)
@@ -843,10 +855,11 @@ if __name__ == '__main__':
                     seed=config.seed,
                     apply_patch=config.apply_patch,
                     patch_after=config.patch_after,
+                    dropout_perturbations=config.dropout_perturbations,
                     constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                     deviation_mode=config.deviation_mode,
-                    non_constant_dim_tau=config.non_constant_dim_tau,
-                    constant_dim_tau=config.constant_dim_tau,
+                    non_constant_dim_tau_base=config.non_constant_dim_tau_base,
+                    constant_dim_tau=config.constant_dim_tau_base,
                 )
             
     elif config.data in ['SWaT', 'WADI']:
@@ -879,10 +892,11 @@ if __name__ == '__main__':
                 seed=config.seed,
                 apply_patch=config.apply_patch,
                 patch_after=config.patch_after,
+                dropout_perturbations=config.dropout_perturbations,
                 constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                 deviation_mode=config.deviation_mode,
-                non_constant_dim_tau=config.non_constant_dim_tau,
-                constant_dim_tau=config.constant_dim_tau,
+                non_constant_dim_tau_base=config.non_constant_dim_tau_base,
+                constant_dim_tau=config.constant_dim_tau_base,
             )
 
             precision = tp / (tp + fp)
@@ -927,8 +941,9 @@ if __name__ == '__main__':
                 seed=config.seed,
                 apply_patch=config.apply_patch,
                 patch_after=config.patch_after,
+                dropout_perturbations=config.dropout_perturbations,
                 constant_dim_amplitude_method=config.constant_dim_amplitude_method,
                 deviation_mode=config.deviation_mode,
-                non_constant_dim_tau=config.non_constant_dim_tau,
-                constant_dim_tau=config.constant_dim_tau,
+                non_constant_dim_tau_base=config.non_constant_dim_tau_base,
+                constant_dim_tau=config.constant_dim_tau_base,
             )

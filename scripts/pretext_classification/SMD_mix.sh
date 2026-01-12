@@ -1,0 +1,17 @@
+python exp_train.py --exp-name "pretext_classification with PLAD" \
+                    --task pretext_classification \
+                    --data SMD \
+                    --positive-augmentor-time 1218_0646 \
+                    --perturbator-time 0105_2008 \
+                    --deviation-mode abs \
+                    --non-constant-dim-tau 0.5 \
+                    --constant-dim-tau 0.5 \
+                    --perturbator-mode plad \
+                    --positive-augmentor-noise-more True \
+                    --make-second-negative-pair True \
+                    --causality-distort perturb \
+                    --negative-augmentor-noise-more True \
+                    --negative-augmentor-noise-type constants \
+                    --mix-negative-pairs True \
+                    --second-negative-pair-ratio 0.2 \
+                    --seed 1
